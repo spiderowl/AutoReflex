@@ -1,7 +1,6 @@
 // AutoReflex - POEFixer Plugin (Phase 1: Bare Shell)
 // Minimal implementation: exports, IPlugin interface, empty stubs
 
-#define PLUGIN_EXPORTS
 #include "AutoReflex.h"
 #include "sdk/PluginHelpers.h"
 

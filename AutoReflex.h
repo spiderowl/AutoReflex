@@ -10,13 +10,12 @@
 #include <memory>
 #include <chrono>
 
-// Forward declarations
-namespace AutoReflex {
-    namespace Rules { class RuleManager; }
-    namespace Storage { class RuleStore; class SettingsStore; }
-    namespace Game { class ConditionState; }
-    namespace Scripting { class ScriptEngine; class ScriptBindings; }
-}
+// Include full headers for types used with std::unique_ptr (complete type required for destruction)
+// Phase 1: only RuleManager, RuleStore, and ConditionState have actual class definitions
+#include "rules/RuleManager.h"
+#include "storage/RuleStore.h"
+#include "game/ConditionState.h"
+// Phase 8+: SettingsStore, ScriptEngine, ScriptBindings will be included here
 
 class AutoReflexPlugin : public IPlugin {
 public:
@@ -69,10 +68,8 @@ private:
     // --- Subsystems ---
     std::unique_ptr<AutoReflex::Rules::RuleManager> m_RuleManager;
     std::unique_ptr<AutoReflex::Storage::RuleStore> m_RuleStore;
-    std::unique_ptr<AutoReflex::Storage::SettingsStore> m_SettingsStore;
     std::unique_ptr<AutoReflex::Game::ConditionState> m_ConditionState;
-    std::unique_ptr<AutoReflex::Scripting::ScriptEngine> m_ScriptEngine;
-    std::unique_ptr<AutoReflex::Scripting::ScriptBindings> m_ScriptBindings;
+    // Phase 8+: m_SettingsStore, m_ScriptEngine, m_ScriptBindings
 
     // --- State ---
     uint64_t m_LastAreaChangeCounter = 0;
