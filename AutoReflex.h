@@ -78,10 +78,25 @@ private:
     int m_RulesFiredThisFrame = 0;
     std::string m_StatusMsg;  // T20: current status message for overlay
 
+    // --- T22: Test fire cooldown ---
+    std::chrono::steady_clock::time_point m_LastTestFire;
+    float m_TestFireCooldownSec = 0.8f;  // 800ms between test fires
+    bool m_TestFireEnabled = false;  // Toggle in DrawSettings
+
+    // --- Panel visibility ---
+    bool m_ShowEntityList = true;
+    bool m_ShowMonsterDetail = true;
+
+    // --- T23: Debug log ---
+    std::vector<std::string> m_DebugLog;
+    static constexpr size_t DEBUG_LOG_MAX = 200;
+    void Log(const std::string& msg);
+
     // --- UI state ---
     int m_SelectedRuleIndex = -1;
     bool m_ShowRuleEditor = false;
     int m_SettingsTab = 0;  // 0=General, 1=Rules, 2=Script Docs
+    bool m_ShowDebugLog = false;  // Toggle debug log visibility
     int m_SelectedMonsterIdx = -1;  // Selected monster index in overlay list
     uint32_t m_WatchedEntityId = 0;  // Entity being watched for detailed component data
     int m_WatchFrameCounter = 0;  // Frames since entity was watched (for diagnostics)

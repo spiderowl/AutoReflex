@@ -1,14 +1,17 @@
 // AutoReflex - POEFixer Plugin
-// Phase 2: Read and Display Game Data
-// Implements: WantsOverlay(), Debug UI, ShouldExecute integration, StatusMsg display
+// Phase 3: Key Press and Cooldown
+// Implements: PressKey(SendInput), Test fire cooldown, Debug log, Log keypresses
 
 #include "AutoReflex.h"
 #include "sdk/PluginHelpers.h"
 #include "core/ShouldExecute.h"
+#include "game/KeySender.h"
 #include "ui/EntityList.h"
 #include "ui/EntityDetail.h"
 
 #include <imgui.h>
+#include <sstream>
+#include <iomanip>
 
 using namespace PluginSDK;
 
@@ -48,7 +51,54 @@ void AutoReflexPlugin::OnDisable() {
 }
 
 void AutoReflexPlugin::DrawSettings() {
-    // Settings UI - Phase 6
+    // Always visible when plugin is enabled (even without game open)
+    // Follows ExamplePlugin pattern: DrawSettings = configuration checkboxes
+
+    // --- Test Fire (works without game) ---
+    ImGui::Checkbox("Test Fire (Q)", &m_TestFireEnabled);
+    ImGui::SameLine();
+    ImGui::Text("Cooldown: %.1fms", m_TestFireCooldownSec * 1000.f);
+    ImGui::SameLine();
+    ImGui::SliderFloat("##TestCooldown", &m_TestFireCooldownSec, 0.1f, 3.0f, "%.1fs");
+
+    if (m_TestFireEnabled) {
+        auto now = std::chrono::steady_clock::now();
+        if (now - m_LastTestFire >= std::chrono::milliseconds(static_cast<uint32_t>(m_TestFireCooldownSec * 1000.0f))) {
+            AutoReflex::Game::PressKey('Q');
+            m_LastTestFire = now;
+            Log("Pressed Q — test fire");
+        }
+    }
+
+    ImGui::Separator();
+
+    // --- Panel visibility toggles ---
+    ImGui::Text("Panels:");
+    ImGui::Checkbox("Debug Log", &m_ShowDebugLog);
+    ImGui::Checkbox("Show Entity List", &m_ShowEntityList);
+    ImGui::Checkbox("Show Monster Detail", &m_ShowMonsterDetail);
+
+    ImGui::Separator();
+
+    // --- Overlay options ---
+    ImGui::Checkbox("Enable Overlay", &m_OverlayEnabled);
+    ImGui::SliderFloat("Window Opacity", &m_WindowAlpha, 0.3f, 1.0f, "%.1f");
+
+    ImGui::Separator();
+
+    // --- Debug Log in settings panel ---
+    if (m_ShowDebugLog) {
+        ImGui::Text("Log (%zu entries):", m_DebugLog.size());
+        if (ImGui::SmallButton("Clear")) m_DebugLog.clear();
+        ImGui::SameLine();
+        ImVec2 logSize = ImGui::GetContentRegionAvail();
+        logSize.y = 120.0f;
+        ImGui::BeginChild("DebugLog", logSize, true);
+        for (const auto& entry : m_DebugLog) {
+            ImGui::TextUnformatted(entry.c_str());
+        }
+        ImGui::EndChild();
+    }
 }
 
 // T14/T15/T16/T20: DrawUI with selectable monster list + detail panel
@@ -79,6 +129,25 @@ void AutoReflexPlugin::DrawUI() {
 
     ImGui::Begin("AutoReflex##AR", nullptr, ImGuiWindowFlags_NoCollapse);
 
+    // --- T22: Test fire at TOP row — works without game (no canExecute gate) ---
+    static bool testFireEnabled = false;
+    ImGui::Checkbox("Test Fire (Q)", &testFireEnabled);
+    ImGui::SameLine();
+    ImGui::Text("Cooldown: %.1fms", m_TestFireCooldownSec * 1000.f);
+    ImGui::SameLine();
+    ImGui::SliderFloat("##TestCooldown", &m_TestFireCooldownSec, 0.1f, 3.0f, "%.1fs");
+
+    if (testFireEnabled) {
+        auto now = std::chrono::steady_clock::now();
+        if (now - m_LastTestFire >= std::chrono::milliseconds(static_cast<uint32_t>(m_TestFireCooldownSec * 1000.0f))) {
+            AutoReflex::Game::PressKey('Q');
+            m_LastTestFire = now;
+            Log("Pressed Q — test fire");
+        }
+    }
+
+    ImGui::Separator();
+
     // T20: Display StatusMsg at top with color
     ImGui::TextColored(statusColor, "%s: %s", (canExecute ? "ACTIVE" : "BLOCKED"), statusReason.c_str());
     ImGui::Separator();
@@ -93,10 +162,24 @@ void AutoReflexPlugin::DrawUI() {
     ImGui::Text("HP%%: %d", vitals.HPPercent);
     ImGui::Separator();
 
+    // --- T23: Debug log UI ---
+    ImGui::Checkbox("Debug Log", &m_ShowDebugLog);
+    if (m_ShowDebugLog) {
+        ImGui::Text("Log (%zu entries):", m_DebugLog.size());
+        if (ImGui::SmallButton("Clear")) m_DebugLog.clear();
+        ImGui::SameLine();
+        ImVec2 logSize = ImGui::GetContentRegionAvail();
+        logSize.y = 120.0f;
+        ImGui::BeginChild("DebugLog", logSize, true);
+        for (const auto& entry : m_DebugLog) {
+            ImGui::TextUnformatted(entry.c_str());
+        }
+        ImGui::EndChild();
+    }
+
+    ImGui::Separator();
+
     // --- Entity list using GetEntityDebugList (same as ExamplePlugin) ---------
-    // GetEntityDebugList returns DebugEntityInfo with ComponentAddresses including
-    // Buffs, which WatchEntity/GetWatchedEntityData can then populate.
-    // RadarEntity from GetSnapshot does NOT have component addresses.
     std::vector<PluginSDK::DebugEntityInfo> debugEntities;
     if (m_Context->GetEntityDebugList) {
         debugEntities = m_Context->GetEntityDebugList();
@@ -122,6 +205,27 @@ void AutoReflexPlugin::DrawUI() {
     ImGui::EndChild();
 
     ImGui::End();
+}
+
+// T23: Log helper - caps at DEBUG_LOG_MAX entries
+void AutoReflexPlugin::Log(const std::string& msg)
+{
+    auto now = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    auto secs = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()) % 60;
+    auto mins = std::chrono::duration_cast<std::chrono::minutes>(now.time_since_epoch()) % 60;
+
+    std::ostringstream oss;
+    oss << '['
+        << std::setfill('0') << std::setw(2) << mins.count() << ':'
+        << std::setfill('0') << std::setw(2) << secs.count() << '.'
+        << std::setfill('0') << std::setw(3) << ms.count()
+        << "] " << msg;
+
+    m_DebugLog.push_back(oss.str());
+    if (m_DebugLog.size() > DEBUG_LOG_MAX) {
+        m_DebugLog.erase(m_DebugLog.begin());
+    }
 }
 
 void AutoReflexPlugin::SaveSettings() {
