@@ -1,70 +1,71 @@
 // AutoReflex - ShouldExecute.cpp
-// Implementation of rule evaluation logic
+// Implementation: blocking checks for rule execution
+// T17: Basic blocking checks (attached, in-game, foreground, town, hideout)
+// T18: Player death check
+// T19: Grace period check
 
 #include "ShouldExecute.h"
-#include "../game/ConditionState.h"
 #include "sdk/PluginContext.h"
 
 namespace AutoReflex {
 
-ShouldEvaluate& ShouldEvaluate::SetBuffConditions(const std::vector<BuffCondition>& conditions) {
-    m_BuffConditions = conditions;
-    return *this;
-}
-
-ShouldEvaluate& ShouldEvaluate::SetHealthCondition(const HealthCondition& condition) {
-    m_HealthCondition = condition;
-    return *this;
-}
-
-ShouldEvaluate& ShouldEvaluate::SetMinMonsters(int count) {
-    m_MinMonsters = count;
-    return *this;
-}
-
-ShouldEvaluate& ShouldEvaluate::SetMaxMonsters(int count) {
-    m_MaxMonsters = count;
-    return *this;
-}
-
-ShouldEvaluate& ShouldEvaluate::SetScriptCondition(const std::string& script) {
-    m_ScriptCondition = script;
-    return *this;
-}
-
-bool ShouldEvaluate::Evaluate(void* context, void* conditionState) const {
-    auto* cs = static_cast<Game::ConditionState*>(conditionState);
-    if (!cs) return false;
-
-    // Check monster count
-    int totalMonsters = static_cast<int>(cs->GetMonsterCount());
-    if (totalMonsters < m_MinMonsters) return false;
-    if (m_MaxMonsters >= 0 && totalMonsters > m_MaxMonsters) return false;
-
-    // Check buff conditions
-    for (const auto& bc : m_BuffConditions) {
-        int count = cs->CountMonstersWithBuff(bc.buffName);
-        if (bc.checkExists && count < bc.minCount) return false;
-        if (bc.maxCount >= 0 && count > bc.maxCount) return false;
-        if (!bc.checkExists && count > 0) return false;
+bool ShouldExecute(PluginContext* ctx, std::string& outReason) {
+    if (!ctx) {
+        outReason = "No context";
+        return false;
     }
 
-    // Check health condition (applied to any matching monster)
-    if (m_HealthCondition.minHealthPct >= 0 || m_HealthCondition.maxHealthPct < 101.0f) {
-        bool anyMatch = false;
-        for (const auto& monster : cs->GetMonsters()) {
-            float hpPct = monster.HealthPercent;
-            if (hpPct >= m_HealthCondition.minHealthPct && hpPct <= m_HealthCondition.maxHealthPct) {
-                anyMatch = true;
-                break;
-            }
+    // T17: Basic blocking checks
+    if (!ctx->IsAttached()) {
+        outReason = "Not attached";
+        return false;
+    }
+
+    if (!ctx->IsInGame()) {
+        outReason = "Not in game";
+        return false;
+    }
+
+    if (!ctx->IsGameForeground()) {
+        outReason = "Game not foreground";
+        return false;
+    }
+
+    auto snapshot = ctx->GetSnapshot();
+    if (!snapshot) {
+        outReason = "No snapshot";
+        return false;
+    }
+
+    // Block in town (can be overridden by a flag in Phase 6 settings)
+    if (snapshot->IsTown) {
+        outReason = "In town";
+        return false;
+    }
+
+    // Block in hideout
+    if (snapshot->IsHideout) {
+        outReason = "In hideout";
+        return false;
+    }
+
+    // T18: Player death check (HPPercent is int: 0-100)
+    auto vitals = ctx->GetPlayerVitals();
+    if (vitals.HPPercent <= 0) {
+        outReason = "Player dead";
+        return false;
+    }
+
+    // T19: Grace period check
+    for (const auto& buff : vitals.Buffs) {
+        if (buff.Name == "grace_period") {
+            outReason = "Grace period";
+            return false;
         }
-        if (!anyMatch) return false;
     }
 
-    // Script condition evaluated separately by ScriptEngine
-    // (handled in RuleManager::EvaluateAll)
-
+    // All checks passed
+    outReason = "Active";
     return true;
 }
 

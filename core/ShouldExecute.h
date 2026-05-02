@@ -1,47 +1,35 @@
 // AutoReflex - ShouldExecute
-// Evaluates whether a rule should fire based on conditions
+// Evaluates whether plugin execution should proceed based on game state.
+// Phase 2: T17 - blocking checks (town, hideout, dead, grace period, etc.)
+//
+// SDK API names verified against PluginContext.h (T12):
+//   GetSnapshot()              - returns shared_ptr<const PluginGameSnapshot>
+//   IsAttached()               - bool
+//   IsInGame()                 - bool
+//   IsGameForeground()         - bool
+//   GetPlayerVitals()          - returns PlayerVitals {HPPercent, Buffs}
+//   PluginGameSnapshot::CurrentState   - GameStateTypes enum
+//   PluginGameSnapshot::IsTown        - bool
+//   PluginGameSnapshot::IsHideout     - bool
+//   PluginGameSnapshot::Player        - RadarEntity {CurrentHP, MaxHP}
+//   RadarEntity::entityType            - EntityTypes enum (Monster = 5)
+//   RadarEntity::Zone                  - NearbyZone enum (InnerCircle=1, OuterCircle=2)
+//   RadarEntity::Rarity                - int (0=Normal, 1=Magic, 2=Rare, 3=Unique)
+//   RadarEntity::ComponentCache        - EntityComponentCache {HasBuffs()}
+//   PluginContext::ReadBuffsComponent  - returns PluginBuffsData {Buffs: vector<PluginBuffData>}
+//   PluginBuffData::Name               - std::string
+//   PluginGameSnapshot::Entities       - vector<RadarEntity>
 
 #pragma once
 
 #include <string>
-#include <vector>
+
+struct PluginContext;
 
 namespace AutoReflex {
 
-// Buff condition: check if a specific buff exists (on player or monsters)
-struct BuffCondition {
-    std::string buffName;           // Name of the buff to look for
-    bool checkExists = true;        // true=must exist, false=must NOT exist
-    int minCount = 1;               // Minimum number of monsters with this buff
-    int maxCount = -1;              // Maximum (-1 = unlimited)
-};
-
-// Health condition: check monster health thresholds
-struct HealthCondition {
-    float minHealthPct = -1.0f;     // Minimum health percentage
-    float maxHealthPct = 101.0f;    // Maximum health percentage
-};
-
-// ShouldEvaluate: determines if a rule's conditions are met
-// Returns true if the rule should fire
-class ShouldEvaluate {
-public:
-    // Set conditions
-    ShouldEvaluate& SetBuffConditions(const std::vector<BuffCondition>& conditions);
-    ShouldEvaluate& SetHealthCondition(const HealthCondition& condition);
-    ShouldEvaluate& SetMinMonsters(int count);
-    ShouldEvaluate& SetMaxMonsters(int count);
-    ShouldEvaluate& SetScriptCondition(const std::string& script);
-
-    // Evaluate against current game state
-    bool Evaluate(void* context, void* conditionState) const;
-
-private:
-    std::vector<BuffCondition> m_BuffConditions;
-    HealthCondition m_HealthCondition;
-    int m_MinMonsters = 1;
-    int m_MaxMonsters = -1;
-    std::string m_ScriptCondition;  // AngelScript expression
-};
+/// Returns true if the plugin should execute rules right now.
+/// If returning false, outReason is set with a human-readable explanation.
+bool ShouldExecute(PluginContext* ctx, std::string& outReason);
 
 } // namespace AutoReflex

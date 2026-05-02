@@ -76,9 +76,13 @@ private:
     std::chrono::steady_clock::time_point m_GlobalCooldownExpiry;
     bool m_CooldownActive = false;
     int m_RulesFiredThisFrame = 0;
+    std::string m_StatusMsg;  // T20: current status message for overlay
 
-    // --- Settings UI state ---
+    // --- UI state ---
     int m_SelectedRuleIndex = -1;
     bool m_ShowRuleEditor = false;
     int m_SettingsTab = 0;  // 0=General, 1=Rules, 2=Script Docs
+    int m_SelectedMonsterIdx = -1;  // Selected monster index in overlay list
+    uint32_t m_WatchedEntityId = 0;  // Entity being watched for detailed component data
+    int m_WatchFrameCounter = 0;  // Frames since entity was watched (for diagnostics)
 };

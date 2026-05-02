@@ -4,10 +4,16 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "../core/ShouldExecute.h"
 
 namespace AutoReflex {
 namespace Rules {
+
+// Forward declaration (defined in RuleManager.cpp)
+struct BuffCondition {
+    std::string BuffNamePattern;  // e.g. "free_movement" or contains:free
+    bool MatchContains = true;    // true=contains match, false=exact match
+    bool RequirePresent = true;   // true=buff must be present, false=buff must be absent
+};
 
 struct Rule {
     std::string Name;

@@ -94,6 +94,8 @@
     <ClCompile Include="scripting\ScriptEngine.cpp" />
     <ClCompile Include="storage\RuleStore.cpp" />
     <ClCompile Include="storage\SettingsStore.cpp" />
+    <ClCompile Include="ui\EntityDetail.cpp" />
+    <ClCompile Include="ui\EntityList.cpp" />
     <ClCompile Include="ui\Overlay.cpp" />
     <ClCompile Include="ui\RuleEditor.cpp" />
     <ClCompile Include="ui\RuleList.cpp" />
@@ -116,6 +118,8 @@
     <ClInclude Include="sdk\PluginHelpers.h" />
     <ClInclude Include="storage\RuleStore.h" />
     <ClInclude Include="storage\SettingsStore.h" />
+    <ClInclude Include="ui\EntityDetail.h" />
+    <ClInclude Include="ui\EntityList.h" />
     <ClInclude Include="ui\Overlay.h" />
     <ClInclude Include="ui\RuleEditor.h" />
     <ClInclude Include="ui\RuleList.h" />
