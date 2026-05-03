@@ -2,6 +2,7 @@
 // Matches ExamplePlugin/examples/ExampleEntities.h one-to-one
 
 #include "EntityDetail.h"
+#include "../sdk/PluginHelpers.h"
 #include "../imgui/imgui.h"
 #include <limits>
 
@@ -281,16 +282,12 @@ void DrawEntityDetail(
     ImGui::Text("Name: %s", entity.Path.c_str());
     ImGui::Text("Id: %u  Address: 0x%llX", entity.Id, (unsigned long long)entity.Address);
 
-    const char* zoneStr = "Far";
-    if (entity.Zone == PluginSDK::NearbyZone::InnerCircle) zoneStr = "Inner";
-    else if (entity.Zone == PluginSDK::NearbyZone::OuterCircle) zoneStr = "Outer";
+    // Use SDK helper functions instead of manual string mapping
+    const char* zoneStr = PluginSDK::GetNearbyZoneName(entity.Zone);
+    const char* rarityStr = PluginSDK::GetRarityName(entity.Rarity);
 
-    const char* rarityStr = "Normal";
-    if (entity.Rarity == 1) rarityStr = "Magic";
-    else if (entity.Rarity == 2) rarityStr = "Rare";
-    else if (entity.Rarity == 3) rarityStr = "Unique";
-
-    bool isFriendlyState = (entity.EntityState == 3);
+    // Use SDK EntityStates enum instead of hardcoded value
+    bool isFriendlyState = (static_cast<PluginSDK::EntityStates>(entity.EntityState) == PluginSDK::EntityStates::MonsterFriendly);
     ImVec4 friendlyColor = isFriendlyState ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
 
     ImGui::Text("Zone: %s  Rarity: %s", zoneStr, rarityStr);

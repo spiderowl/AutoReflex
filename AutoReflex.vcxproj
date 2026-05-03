@@ -32,6 +32,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)x64\Release\Plugins\AutoReflex\</OutDir>
@@ -43,6 +44,9 @@
     <IntDir>$(ProjectDir)obj\Debug\</IntDir>
     <TargetName>AutoReflex</TargetName>
   </PropertyGroup>
+  <PropertyGroup Label="AngelScriptRoot">
+    <ASRoot>$(SolutionDir)angelscript_2.38.0\sdk</ASRoot>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -50,16 +54,14 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>PLUGIN_EXPORTS;NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>PLUGIN_EXPORTS;NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ASRoot)\angelscript\include;$(ASRoot)\angelscript\source;$(ASRoot)\add_on;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
@@ -68,11 +70,11 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>PLUGIN_EXPORTS;_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>PLUGIN_EXPORTS;_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;AS_DEBUG;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ASRoot)\angelscript\include;$(ASRoot)\angelscript\source;$(ASRoot)\add_on;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -90,7 +92,6 @@
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
     <ClCompile Include="rules\RuleManager.cpp" />
-    <ClCompile Include="scripting\ScriptBindings.cpp" />
     <ClCompile Include="scripting\ScriptEngine.cpp" />
     <ClCompile Include="storage\RuleStore.cpp" />
     <ClCompile Include="storage\SettingsStore.cpp" />
@@ -100,17 +101,53 @@
     <ClCompile Include="ui\RuleEditor.cpp" />
     <ClCompile Include="ui\RuleList.cpp" />
     <ClCompile Include="ui\SettingsPanel.cpp" />
+    <!-- AngelScript Core Sources -->
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_atomic.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_builder.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_bytecode.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_callfunc.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_callfunc_x64_msvc.cpp" />
+    <MASM Include="$(ASRoot)\angelscript\source\as_callfunc_x64_msvc_asm.asm">
+      <ObjectFileName>$(IntDir)as_callfunc_x64_msvc_asm.obj</ObjectFileName>
+    </MASM>
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_compiler.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_configgroup.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_context.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_datatype.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_gc.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_generic.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_globalproperty.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_memory.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_module.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_objecttype.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_outputbuffer.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_parser.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_restore.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_scriptcode.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_scriptengine.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_scriptfunction.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_scriptnode.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_scriptobject.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_string.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_string_util.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_thread.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_tokenizer.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_typeinfo.cpp" />
+    <ClCompile Include="$(ASRoot)\angelscript\source\as_variablescope.cpp" />
+    <!-- AngelScript Add-on Sources -->
+    <ClCompile Include="$(ASRoot)\add_on\scriptstdstring\scriptstdstring.cpp" />
+    <ClCompile Include="$(ASRoot)\add_on\scriptstdstring\scriptstdstring_utils.cpp" />
+    <ClCompile Include="$(ASRoot)\add_on\scriptbuilder\scriptbuilder.cpp" />
+    <ClCompile Include="$(ASRoot)\add_on\scriptarray\scriptarray.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AutoReflex.h" />
-    <ClInclude Include="core\PluginContext.h" />
     <ClInclude Include="core\ShouldExecute.h" />
     <ClInclude Include="game\ConditionState.h" />
     <ClInclude Include="game\KeySender.h" />
     <ClInclude Include="game\MonsterInfo.h" />
     <ClInclude Include="rules\Rule.h" />
     <ClInclude Include="rules\RuleManager.h" />
-    <ClInclude Include="scripting\ScriptBindings.h" />
     <ClInclude Include="scripting\ScriptEngine.h" />
     <ClInclude Include="sdk\PluginAPI.h" />
     <ClInclude Include="sdk\PluginContext.h" />
@@ -124,8 +161,13 @@
     <ClInclude Include="ui\RuleEditor.h" />
     <ClInclude Include="ui\RuleList.h" />
     <ClInclude Include="ui\SettingsPanel.h" />
+    <ClInclude Include="$(ASRoot)\angelscript\include\angelscript.h" />
+    <ClInclude Include="$(ASRoot)\add_on\scriptstdstring\scriptstdstring.h" />
+    <ClInclude Include="$(ASRoot)\add_on\scriptbuilder\scriptbuilder.h" />
+    <ClInclude Include="$(ASRoot)\add_on\scriptarray\scriptarray.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
   </ImportGroup>
 </Project>

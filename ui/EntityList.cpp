@@ -2,6 +2,7 @@
 
 #include "EntityList.h"
 #include "../sdk/PluginGameData.h"
+#include "../sdk/PluginHelpers.h"
 #include "../imgui/imgui.h"
 
 namespace AutoReflex {
@@ -9,8 +10,9 @@ namespace AutoReflex {
 std::vector<size_t> CollectMonsters(const std::vector<PluginSDK::DebugEntityInfo>& debugEntities) {
     std::vector<size_t> indices;
     for (size_t i = 0; i < debugEntities.size(); i++) {
-        // EntityType 2 = NPC, 5 = Monster
-        if (debugEntities[i].EntityType == 2 || debugEntities[i].EntityType == 5) {
+        // Use SDK EntityTypes enum instead of hardcoded values
+        auto type = static_cast<PluginSDK::EntityTypes>(debugEntities[i].EntityType);
+        if (type == PluginSDK::EntityTypes::NPC || type == PluginSDK::EntityTypes::Monster) {
             indices.push_back(i);
         }
     }
@@ -28,14 +30,9 @@ int DrawEntityList(const std::vector<PluginSDK::DebugEntityInfo>& debugEntities,
     for (size_t idx = 0; idx < monsterIndices.size(); idx++) {
         const auto& entity = debugEntities[monsterIndices[idx]];
 
-        const char* zoneStr = "Far";
-        if (entity.Zone == PluginSDK::NearbyZone::InnerCircle) zoneStr = "Inner";
-        else if (entity.Zone == PluginSDK::NearbyZone::OuterCircle) zoneStr = "Outer";
-
-        const char* rarityStr = "Normal";
-        if (entity.Rarity == 1) rarityStr = "Magic";
-        else if (entity.Rarity == 2) rarityStr = "Rare";
-        else if (entity.Rarity == 3) rarityStr = "Unique";
+        // Use SDK helper functions instead of manual string mapping
+        const char* zoneStr = PluginSDK::GetNearbyZoneName(entity.Zone);
+        const char* rarityStr = PluginSDK::GetRarityName(entity.Rarity);
 
         char label[512];
         std::snprintf(label, sizeof(label), "[%s] [%s] %u %s",

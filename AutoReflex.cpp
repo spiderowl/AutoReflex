@@ -129,25 +129,6 @@ void AutoReflexPlugin::DrawUI() {
 
     ImGui::Begin("AutoReflex##AR", nullptr, ImGuiWindowFlags_NoCollapse);
 
-    // --- T22: Test fire at TOP row — works without game (no canExecute gate) ---
-    static bool testFireEnabled = false;
-    ImGui::Checkbox("Test Fire (Q)", &testFireEnabled);
-    ImGui::SameLine();
-    ImGui::Text("Cooldown: %.1fms", m_TestFireCooldownSec * 1000.f);
-    ImGui::SameLine();
-    ImGui::SliderFloat("##TestCooldown", &m_TestFireCooldownSec, 0.1f, 3.0f, "%.1fs");
-
-    if (testFireEnabled) {
-        auto now = std::chrono::steady_clock::now();
-        if (now - m_LastTestFire >= std::chrono::milliseconds(static_cast<uint32_t>(m_TestFireCooldownSec * 1000.0f))) {
-            AutoReflex::Game::PressKey('Q');
-            m_LastTestFire = now;
-            Log("Pressed Q — test fire");
-        }
-    }
-
-    ImGui::Separator();
-
     // T20: Display StatusMsg at top with color
     ImGui::TextColored(statusColor, "%s: %s", (canExecute ? "ACTIVE" : "BLOCKED"), statusReason.c_str());
     ImGui::Separator();

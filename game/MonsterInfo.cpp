@@ -1,6 +1,6 @@
 // AutoReflex - MonsterInfo.cpp
 // Implementation: parse monsters from game snapshot
-// Phase 1: Stub implementation matching actual SDK v2 API
+// Returns PluginSDK::RadarEntity directly (no custom MonsterData)
 
 #include "MonsterInfo.h"
 #include "sdk/PluginGameData.h"
@@ -10,51 +10,28 @@
 namespace AutoReflex {
 namespace Game {
 
-std::vector<MonsterData> ParseMonsters(void* context, const void* snapshot) {
+std::vector<PluginSDK::RadarEntity> ParseMonsters(void* context, const void* snapshot) {
     (void)context;
-    std::vector<MonsterData> result;
+    std::vector<PluginSDK::RadarEntity> result;
 
     auto* snap = static_cast<const PluginSDK::PluginGameSnapshot*>(snapshot);
     if (!snap || !snap->IsAttached) return result;
 
-    // Iterate through Entities in the snapshot (actual SDK field name)
+    // Iterate through Entities in the snapshot
     for (const auto& entity : snap->Entities) {
         std::string path = PluginSDK::WideToNarrow(entity.Path);
         if (!IsMonsterEntity(path)) continue;
 
-        MonsterData data;
-        data.EntityId = entity.Id;
-        data.Path = std::move(path);
-        data.WorldX = entity.WorldX;
-        data.WorldY = entity.WorldY;
-        data.WorldZ = entity.WorldZ;
+        if (entity.CurrentHP <= 0 || entity.IsSleeping) continue;
 
-        // Health from RadarEntity directly
-        data.CurrentHP = entity.CurrentHP;
-        data.MaxHP = entity.MaxHP;
-        data.IsAlive = entity.CurrentHP > 0;
-        data.HealthPercent = data.MaxHP > 0
-            ? static_cast<float>(data.CurrentHP) * 100.0f / data.MaxHP
-            : 0.0f;
-
-        // Distance to player
-        float dx = data.WorldX - snap->Player.WorldX;
-        float dy = data.WorldY - snap->Player.WorldY;
-        float dz = data.WorldZ - snap->Player.WorldZ;
-        data.DistanceToPlayer = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-        if (data.IsAlive) {
-            result.push_back(std::move(data));
-        }
+        result.push_back(entity);
     }
 
     return result;
 }
 
-std::vector<BuffInfo> ExtractBuffs(void*, uintptr_t) {
-    // Phase 1: buff extraction stub
-    // SDK provides buff data through PlayerVitals.Buffs for the player only.
-    // Monster buff reading requires component traversal not available in Phase 1.
+std::vector<PluginSDK::PluginBuffData> ExtractBuffs(void*, uintptr_t) {
+    // Stub: buff extraction via component traversal
     return {};
 }
 

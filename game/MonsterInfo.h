@@ -1,5 +1,6 @@
 // AutoReflex - MonsterInfo
-// Data structures for monster and buff information
+// Thin wrapper around PluginSDK::RadarEntity for monster utilities
+// Uses SDK types directly instead of custom MonsterData/BuffInfo
 
 #pragma once
 
@@ -7,46 +8,40 @@
 #include <vector>
 #include <cstdint>
 
+#include "sdk/PluginGameData.h"
+
 namespace AutoReflex {
 namespace Game {
 
-// Individual buff on a monster
-struct BuffInfo {
-    std::string Name;
-    int Duration = 0;
-    bool IsBeneficial = false;
-    bool IsDebuff = false;
-};
-
-// Single monster entity data
-struct MonsterData {
-    uintptr_t Address = 0;
-    uint32_t EntityId = 0;
-    std::string Path;               // Entity metadata path
-    float WorldX = 0, WorldY = 0, WorldZ = 0;
-    float ScreenX = 0, ScreenY = 0;
-    bool OnScreen = false;
-    float HealthPercent = 100.0f;
-    int CurrentHP = 0;
-    int MaxHP = 0;
-    std::vector<BuffInfo> Buffs;
-    bool IsAlive = true;
-    float DistanceToPlayer = 0.0f;
-};
-
 // Parse monster data from the game snapshot
-// Returns vector of monsters in the current area
-std::vector<MonsterData> ParseMonsters(
+// Returns vector of RadarEntities filtered to monsters only
+std::vector<PluginSDK::RadarEntity> ParseMonsters(
     void* context,
     const void* snapshot);
 
-// Extract buffs for a single monster from its component data
-std::vector<BuffInfo> ExtractBuffs(
+// Extract buffs for a single entity from its component data
+std::vector<PluginSDK::PluginBuffData> ExtractBuffs(
     void* context,
     uintptr_t entityAddress);
 
 // Check if an entity path represents a monster/enemy
 bool IsMonsterEntity(const std::string& path);
+
+// Convenience: check if a RadarEntity is a monster
+inline bool IsMonster(const PluginSDK::RadarEntity& e) {
+    return e.entityType == PluginSDK::EntityTypes::Monster ||
+           e.entityType == PluginSDK::EntityTypes::NPC;
+}
+
+// Convenience: health percentage from RadarEntity
+inline float HealthPercent(const PluginSDK::RadarEntity& e) {
+    return e.MaxHP > 0 ? (float)e.CurrentHP / (float)e.MaxHP * 100.0f : 0.0f;
+}
+
+// Convenience: is entity alive
+inline bool IsAlive(const PluginSDK::RadarEntity& e) {
+    return e.CurrentHP > 0 && !e.IsSleeping;
+}
 
 } // namespace Game
 } // namespace AutoReflex
