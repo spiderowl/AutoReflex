@@ -183,7 +183,7 @@ bool RuleStore::LoadRule(const std::string& name, Rules::Rule& outRule) const {
     outRule.Order = orderVal.empty() ? 0 : std::stoi(orderVal);
     outRule.ScriptBody = scriptVal;
     outRule.CompileError = errorVal;
-    outRule.Module = nullptr;
+    outRule.CompiledExpr.reset();
     outRule.LastEvalResult = false;
     outRule.EverFired = false;
     outRule.LastFired = std::chrono::steady_clock::time_point();

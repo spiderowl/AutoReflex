@@ -1,13 +1,13 @@
 // AutoReflex - RuleManager.cpp
-// Compiles and evaluates rules using AngelScript
+// Compiles and evaluates rules using EXPRTK expressions
 
 #include "RuleManager.h"
 #include "Rule.h"
+#include "../core/AgentDebugLog.h"
 #include "../game/ConditionState.h"
+#include "../scripting/ScriptEngine.h"
 #include "../storage/RuleStore.h"
 #include "../sdk/PluginContext.h"
-
-#include "angelscript.h"
 
 #include <chrono>
 #include <sstream>
@@ -16,8 +16,7 @@
 
 namespace AutoReflex { namespace Rules {
 
-RuleManager::RuleManager(asIScriptEngine* engine)
-    : m_Engine(engine)
+RuleManager::RuleManager()
 {
 }
 
@@ -38,39 +37,52 @@ void RuleManager::LoadRules(Storage::RuleStore& store)
 
 void RuleManager::CompileRule(Rule& rule)
 {
-    if (!m_Engine) {
-        rule.CompileError = "Script engine not initialized";
-        rule.Module = nullptr;
-        return;
-    }
-
-    // Build module name from rule name: "Rule_<name>"
-    std::string moduleName = "Rule_";
-    for (char c : rule.Name) {
-        if (std::isalnum(static_cast<unsigned char>(c))) moduleName += c;
-        else moduleName += '_';
-    }
-
-    // Get or create module
-    asIScriptModule* module = m_Engine->GetModule(moduleName.c_str(), asGM_CREATE_IF_NOT_EXISTS);
-    if (!module) {
-        rule.CompileError = "Failed to create script module";
-        return;
-    }
-
-    // Combine boilerplate + user body
-    std::string fullScript = "// AutoReflex rule script\n" + rule.ScriptBody;
-
-    // Build the script
-    int r = module->Build();
-    if (r < 0) {
-        // AngelScript doesn't expose per-module error messages easily in this SDK
-        rule.CompileError = "Compilation failed (check script syntax)";
-        return;
-    }
-
-    rule.Module = module;
     rule.CompileError.clear();
+    rule.CompiledExpr.reset();
+
+    // ScriptBody should be an EXPRTK boolean expression
+    std::string expr = rule.ScriptBody;
+
+    if (expr.empty()) {
+        rule.CompileError = "Expression is empty";
+        // #region agent log
+        ArAgentNdjsonLog("H-BUILD", "RuleManager::CompileRule", "Expression is empty for rule: " + rule.Name, "{}");
+        // #endregion
+        return;
+    }
+
+    // Validate the expression first
+    std::string errorMsg;
+    if (!ScriptEngine::ValidateExpression(expr, errorMsg)) {
+        rule.CompileError = errorMsg;
+        // #region agent log
+        ArAgentNdjsonLog("H-BUILD", "RuleManager::CompileRule.ValidateFailed",
+            std::string("rule=") + rule.Name + " err=" + errorMsg,
+            "{}");
+        // #endregion
+        return;
+    }
+
+    // Create and compile the expression
+    rule.CompiledExpr = std::make_unique<CompiledExpression>();
+    if (!rule.CompiledExpr->Compile(expr, rule.CompileError)) {
+        rule.CompiledExpr.reset();
+        // #region agent log
+        ArAgentNdjsonLog("H-BUILD", "RuleManager::CompileRule.CompileFailed",
+            std::string("rule=") + rule.Name + " err=" + rule.CompileError,
+            "{}");
+        // #endregion
+        return;
+    }
+
+    // #region agent log
+    {
+        std::ostringstream d;
+        d << "{\"ruleName\":\"" << ArJsonEsc(rule.Name)
+          << "\",\"exprLen\":" << expr.size() << "}";
+        ArAgentNdjsonLog("H-BUILD", "RuleManager::CompileRule.BuildOk", "Rule compiled successfully", d.str());
+    }
+    // #endregion
 }
 
 void RuleManager::EvaluateAll(
@@ -78,7 +90,12 @@ void RuleManager::EvaluateAll(
     Game::ConditionState& conditionState,
     std::function<void(const Rule&)> onFire)
 {
+    if (!ctx) return;
     auto now = std::chrono::steady_clock::now();
+
+    // Snapshot is consistent for this evaluation pass; fetch once per frame.
+    auto snapshot = ctx->GetSnapshot();
+    if (!snapshot) return;
 
     // Sort by order (lower = higher priority)
     std::vector<size_t> indices(m_Rules.size());
@@ -93,54 +110,29 @@ void RuleManager::EvaluateAll(
         // Skip disabled rules
         if (!rule.Enabled) continue;
 
-        // Skip if no compiled module
-        if (!rule.Module) continue;
+        // Skip if no compiled expression
+        if (!rule.CompiledExpr || !rule.CompiledExpr->IsValid()) continue;
 
         // Check cooldown
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - rule.LastFired).count();
         if (elapsed < rule.CooldownSec * 1000.0f) continue;
 
-        // Execute AngelScript: call CheckCondition(RadarEntity& entity) for each monster
+        // Evaluate EXPRTK expression against each entity
         bool conditionMet = false;
 
-        if (rule.Module && m_Engine) {
-            // Find the CheckCondition function in this rule's module
-            asIScriptFunction* func = rule.Module->GetFunctionByName("CheckCondition");
-            if (func) {
-                // Create a script context
-                asIScriptContext* ctx_script = m_Engine->CreateContext();
-                if (ctx_script) {
-                    int r = ctx_script->Prepare(func);
-                    if (r >= 0) {
-                        // Get Entities from PluginContext snapshot
-                        auto snapshot = ctx->GetSnapshot();
-                        if (snapshot) {
-                            for (const auto& entity : snapshot->Entities) {
-                                if (!entity.IsValid) continue;
+        // Get cursor position in grid coordinates
+        auto curPos = conditionState.CursorPos();
+        double curX = static_cast<double>(curPos.x);
+        double curY = static_cast<double>(curPos.y);
 
-                                // Pass entity as argument (RadarEntity is passed by pointer)
-                                ctx_script->SetArgObject(0, const_cast<PluginSDK::RadarEntity*>(&entity));
+        // Get Entities from PluginContext snapshot
+        for (const auto& entity : snapshot->Entities) {
+            if (!entity.IsValid) continue;
 
-                                r = ctx_script->Execute();
-                                if (r >= 0) {
-                                    // Read return value (bool returns as byte)
-                                    bool result = ctx_script->GetReturnByte() != 0;
-                                    if (result) {
-                                        conditionMet = true;
-                                        break;
-                                    }
-                                } else {
-                                    // Execution failed, check exception
-                                    const char* exception = ctx_script->GetExceptionString();
-                                    (void)exception; // Silently skip entity on script error
-                                }
-                                ctx_script->Unprepare();
-                            }
-                        }
-                    }
-
-                    ctx_script->Release();
-                }
+            // Evaluate the EXPRTK expression against this entity
+            if (rule.CompiledExpr->Evaluate(entity, curX, curY)) {
+                conditionMet = true;
+                break;
             }
         }
 

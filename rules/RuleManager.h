@@ -1,15 +1,13 @@
 // AutoReflex - RuleManager
-// Manages collection of rules, compiles scripts, evaluates conditions
+// Manages collection of rules, compiles EXPRTK expressions, evaluates conditions
 
 #pragma once
 #include "Rule.h"
 #include <vector>
 #include <functional>
 #include <string>
-#include <memory>
 
 struct PluginContext;
-class asIScriptEngine;
 namespace AutoReflex { namespace Game { class ConditionState; }}
 namespace AutoReflex { namespace Storage { class RuleStore; }}
 
@@ -18,13 +16,13 @@ namespace Rules {
 
 class RuleManager {
 public:
-    explicit RuleManager(asIScriptEngine* engine);
+    RuleManager();
     ~RuleManager();
 
     // Load all rules from disk
     void LoadRules(Storage::RuleStore& store);
 
-    // Compile a single rule's script into an AngelScript module
+    // Compile a single rule's EXPRTK expression
     void CompileRule(Rule& rule);
 
     // Evaluate all enabled rules; call onFire for each that fires
@@ -40,7 +38,6 @@ public:
     int SelectedRuleIndex = -1;
 
 private:
-    asIScriptEngine* m_Engine = nullptr;
     std::vector<Rule> m_Rules;
 };
 

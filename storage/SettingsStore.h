@@ -5,23 +5,23 @@
 
 #include <string>
 
-struct PluginContext;
+class AutoReflexPlugin;
 
 namespace AutoReflex {
 namespace Storage {
 
 class SettingsStore {
 public:
-    explicit SettingsStore(PluginContext* ctx);
+    explicit SettingsStore(AutoReflexPlugin* plugin);
 
-    // Load settings from disk into PluginContext
+    // Load settings from disk into plugin members
     void Load();
 
-    // Save settings from PluginContext to disk
+    // Save settings from plugin members to disk
     void Save();
 
 private:
-    PluginContext* m_Ctx;
+    AutoReflexPlugin* m_Plugin;
     std::string    m_ConfigPath;
 };
 

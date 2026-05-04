@@ -17,6 +17,7 @@ public:
 private:
     static void DrawGeneralTab(AutoReflexPlugin* plugin, float rightMargin);
     static void DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargin);
+    static void DrawDebugLogTab(AutoReflexPlugin* plugin, float rightMargin);
 
     // Create a new rule with defaults
     static AutoReflex::Rules::Rule CreateNewRule(const std::string& name);

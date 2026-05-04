@@ -19,9 +19,11 @@
 #include "scripting/ScriptEngine.h"
 
 namespace AutoReflex { namespace UI { class SettingsPanel; }}
+namespace AutoReflex { namespace Storage { class SettingsStore; }}
 
 class AutoReflexPlugin : public IPlugin {
     friend class AutoReflex::UI::SettingsPanel;
+    friend class AutoReflex::Storage::SettingsStore;
 
 public:
     // --- IPlugin overrides ---
@@ -71,7 +73,7 @@ private:
     float m_KeyHoldDuration = 0.05f;
 
     // --- Subsystems ---
-    ScriptEngine m_ScriptEngine;                          // Phase 4: AngelScript engine
+    ScriptEngine m_ScriptEngine;                          // EXPRTK expression engine
     std::unique_ptr<AutoReflex::Rules::RuleManager> m_RuleManager;
     std::unique_ptr<AutoReflex::Storage::RuleStore> m_RuleStore;
     std::unique_ptr<AutoReflex::Storage::SettingsStore> m_SettingsStore;
@@ -102,7 +104,8 @@ private:
     int m_SelectedRuleIndex = -1;
     bool m_ShowRuleEditor = false;
     int m_SettingsTab = 0;  // 0=General, 1=Rules, 2=Script Docs
-    bool m_ShowDebugLog = false;  // Toggle debug log visibility
+    bool m_ShowDebugLog = false;  // Toggle debug log visibility (overlay window)
+    bool m_DebugLogTabEnabled = false;  // Settings tab "Debug Log": show log viewer when true
     int m_SelectedMonsterIdx = -1;  // Selected monster index in overlay list
     uint32_t m_WatchedEntityId = 0;  // Entity being watched for detailed component data
     int m_WatchFrameCounter = 0;  // Frames since entity was watched (for diagnostics)

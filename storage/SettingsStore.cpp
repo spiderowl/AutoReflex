@@ -16,12 +16,12 @@
 // }
 
 #include "SettingsStore.h"
-#include "AutoReflex.h"
-#include "sdk/PluginContext.h"
+#include "../AutoReflex.h"
 
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <filesystem>
 
 namespace AutoReflex { namespace Storage {
 
@@ -48,6 +48,13 @@ static std::string trim(const std::string& s) {
     if (start == std::string::npos) return "";
     auto end = s.find_last_not_of(" \t\r\n");
     return s.substr(start, end - start + 1);
+}
+
+static std::string unquote(const std::string& s) {
+    auto t = trim(s);
+    if (t.size() >= 2 && t.front() == '\"' && t.back() == '\"')
+        return t.substr(1, t.size() - 2);
+    return t;
 }
 
 // Parse a simple JSON object (one level, values are bool/float/int/string)
@@ -84,29 +91,24 @@ static int parseInt(const std::string& s, int def) {
     catch (...) { return def; }
 }
 
-static std::string parseString(const std::string& s) {
-    // Strip surrounding quotes
-    if (s.size() >= 2 && s.front() == '\"' && s.back() == '\"') {
-        return s.substr(1, s.size() - 2);
-    }
-    return s;
-}
-
 // ── SettingsStore implementation ────────────────────────────────────
 
-SettingsStore::SettingsStore(PluginContext* ctx)
-    : m_Ctx(ctx)
+SettingsStore::SettingsStore(AutoReflexPlugin* plugin)
+    : m_Plugin(plugin)
 {
-    // config/settings.json relative to plugin directory
-    // We'll get the path from the AutoReflexPlugin
-    m_ConfigPath = "config/settings.json";
+    if (!m_Plugin) {
+        m_ConfigPath = "config/settings.json";
+        return;
+    }
+
+    // Always store config under the plugin directory so the host's CWD doesn't matter.
+    std::filesystem::path p = std::filesystem::path(m_Plugin->m_Directory) / "config" / "settings.json";
+    m_ConfigPath = p.string();
 }
 
 void SettingsStore::Load() {
-    if (!m_Ctx) return;
+    if (!m_Plugin) return;
 
-    // Build full path: use plugin directory + config/settings.json
-    // For now, read from file
     std::ifstream file(m_ConfigPath);
     if (!file.is_open()) return;
 
@@ -118,29 +120,44 @@ void SettingsStore::Load() {
     std::istringstream stream(content);
     std::string line;
 
-    // Cast to AutoReflexPlugin to access settings
-    // (In production, this would use a proper settings struct)
     while (std::getline(stream, line)) {
         std::string key, value;
         parseJsonLine(line, key, value);
         if (key.empty()) continue;
 
-        // Parse based on key name
-        // Note: This is a simplified approach - in production use a proper settings struct
+        if (key == "OverlayEnabled") m_Plugin->m_OverlayEnabled = parseBool(value);
+        else if (key == "ShowStatusWindow") m_Plugin->m_ShowStatusWindow = parseBool(value);
+        else if (key == "WindowAlpha") m_Plugin->m_WindowAlpha = parseFloat(value, m_Plugin->m_WindowAlpha);
+        else if (key == "SimKeyMethod") m_Plugin->m_SimKeyMethod = parseInt(value, m_Plugin->m_SimKeyMethod);
+        else if (key == "GlobalCooldown") m_Plugin->m_GlobalCooldown = parseFloat(value, m_Plugin->m_GlobalCooldown);
+        else if (key == "KeyHoldDuration") m_Plugin->m_KeyHoldDuration = parseFloat(value, m_Plugin->m_KeyHoldDuration);
+        else if (key == "OverlayX") { /* reserved for future draggable overlay */ }
+        else if (key == "OverlayY") { /* reserved for future draggable overlay */ }
+        else if (key == "Profile") { (void)unquote(value); } // reserved
     }
 }
 
 void SettingsStore::Save() {
-    if (!m_Ctx) return;
+    if (!m_Plugin) return;
 
-    // Ensure directory exists
-    // Create config directory if needed
-    std::ifstream test("config/settings.json");
-    
+    // Ensure directory exists (config/)
+    try {
+        std::filesystem::path p(m_ConfigPath);
+        std::filesystem::create_directories(p.parent_path());
+    } catch (...) {
+        // if directory creation fails, just attempt to write and let it fail
+    }
+
     std::ofstream file(m_ConfigPath);
     if (!file.is_open()) return;
 
     file << "{\n";
+    file << "  \"OverlayEnabled\": " << (m_Plugin->m_OverlayEnabled ? "true" : "false") << ",\n";
+    file << "  \"ShowStatusWindow\": " << (m_Plugin->m_ShowStatusWindow ? "true" : "false") << ",\n";
+    file << "  \"WindowAlpha\": " << m_Plugin->m_WindowAlpha << ",\n";
+    file << "  \"SimKeyMethod\": " << m_Plugin->m_SimKeyMethod << ",\n";
+    file << "  \"GlobalCooldown\": " << m_Plugin->m_GlobalCooldown << ",\n";
+    file << "  \"KeyHoldDuration\": " << m_Plugin->m_KeyHoldDuration << "\n";
     file << "}\n";
 }
 

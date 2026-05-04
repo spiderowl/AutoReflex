@@ -1,19 +1,27 @@
-// ConditionState.cpp - stub implementation
+// ConditionState.cpp
 #include "ConditionState.h"
 
 namespace AutoReflex {
 namespace Game {
 
-void ConditionState::Update(PluginContext* /*ctx*/, const PluginSDK::PluginGameSnapshot* /*snapshot*/) {
-    // Phase 1: stub
+void ConditionState::Update(PluginContext* ctx,
+                            const PluginSDK::PluginGameSnapshot* snapshot,
+                            Vector2f cursorGridPos)
+{
+    cursorGridPos_ = cursorGridPos;
+    if (snapshot) {
+        cache_.Rebuild(ctx, *snapshot, cursorGridPos);
+    }
 }
 
-void ConditionState::ResetOnAreaChange() {
-    m_Monsters.clear();
+void ConditionState::ResetOnAreaChange()
+{
+    cache_.Clear();
 }
 
-int ConditionState::CountMonstersWithBuff(const std::string& /*buffName*/) const {
-    return 0;
+int ConditionState::CountMonstersWithBuff(const std::string& buffName) const
+{
+    return Monsters(cache_).HasBuff(buffName).Count();
 }
 
 } // namespace Game

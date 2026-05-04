@@ -53,15 +53,15 @@ void AutoReflexPlugin::SetContext(PluginContext* context) {
 }
 
 void AutoReflexPlugin::OnEnable(bool isGameOpened) {
-    // Phase 4: Initialize AngelScript engine
+    // Initialize EXPRTK engine (header-only, lightweight)
     if (!m_ScriptEngine.IsInitialized()) {
         m_ScriptEngine.Initialize();
-        Log("AngelScript engine initialized");
+        Log("EXPRTK engine initialized");
     }
 
     // Phase 7: Create subsystems
     if (!m_RuleManager) {
-        m_RuleManager = std::make_unique<AutoReflex::Rules::RuleManager>(m_ScriptEngine.GetEngine());
+        m_RuleManager = std::make_unique<AutoReflex::Rules::RuleManager>();
         Log("RuleManager created");
     }
 
@@ -72,7 +72,7 @@ void AutoReflexPlugin::OnEnable(bool isGameOpened) {
     }
 
     if (!m_SettingsStore) {
-        m_SettingsStore = std::make_unique<AutoReflex::Storage::SettingsStore>(m_Context);
+        m_SettingsStore = std::make_unique<AutoReflex::Storage::SettingsStore>(this);
         Log("SettingsStore created");
     }
 
@@ -129,6 +129,13 @@ void AutoReflexPlugin::DrawUI() {
     // T17/T18/T19: Evaluate ShouldExecute and store result
     std::string statusReason;
     bool canExecute = AutoReflex::ShouldExecute(m_Context, statusReason);
+
+    // Rebuild monster cache from snapshot (cold path — once per frame)
+    // Cursor grid position is {0,0} for now; proper ScreenToGrid conversion is a future task.
+    if (m_ConditionState) {
+        m_ConditionState->Update(m_Context, snapshot.get(),
+                                 AutoReflex::Game::Vector2f{0.0f, 0.0f});
+    }
 
     // Phase 7+10: Evaluate all rules each frame (only when allowed)
     m_RulesFiredThisFrame = 0;

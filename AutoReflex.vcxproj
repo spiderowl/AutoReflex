@@ -56,10 +56,11 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(VcpkgInstalled)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ProjectDir)scripting;$(VcpkgInstalled)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>angelscript.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(VcpkgInstalled)\lib;$(VcpkgInstalled)\lib\x64-windows;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -70,14 +71,15 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>PLUGIN_EXPORTS;_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;AS_DEBUG;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>PLUGIN_EXPORTS;_DEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(VcpkgInstalled)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ProjectDir)scripting;$(VcpkgInstalled)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>angelscriptd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(VcpkgInstalled)\debug\lib;$(VcpkgInstalled)\debug\lib\x64-windows;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -88,7 +90,8 @@
     <ClCompile Include="core\ShouldExecute.cpp" />
     <ClCompile Include="game\ConditionState.cpp" />
     <ClCompile Include="game\KeySender.cpp" />
-    <ClCompile Include="game\MonsterInfo.cpp" />
+    <ClCompile Include="game\NearbyMonsterCache.cpp" />
+    <ClCompile Include="game\MonsterQuery.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_tables.cpp" />
@@ -106,12 +109,17 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AutoReflex.h" />
+    <ClInclude Include="core\AgentDebugLog.h" />
     <ClInclude Include="core\ShouldExecute.h" />
     <ClInclude Include="game\ConditionState.h" />
     <ClInclude Include="game\KeySender.h" />
+    <ClInclude Include="game\MonsterHelpers.h" />
     <ClInclude Include="game\MonsterInfo.h" />
+    <ClInclude Include="game\NearbyMonsterCache.h" />
+    <ClInclude Include="game\MonsterQuery.h" />
     <ClInclude Include="rules\Rule.h" />
     <ClInclude Include="rules\RuleManager.h" />
+    <ClInclude Include="scripting\exprtk.hpp" />
     <ClInclude Include="scripting\ScriptEngine.h" />
     <ClInclude Include="sdk\PluginAPI.h" />
     <ClInclude Include="sdk\PluginContext.h" />

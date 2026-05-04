@@ -1,47 +1,48 @@
-// AutoReflex - MonsterInfo
-// Thin wrapper around PluginSDK::RadarEntity for monster utilities
-// Uses SDK types directly instead of custom MonsterData/BuffInfo
-
 #pragma once
 
 #include <string>
-#include <vector>
+#include <unordered_set>
 #include <cstdint>
 
-#include "sdk/PluginGameData.h"
+namespace AutoReflex { namespace Game {
 
-namespace AutoReflex {
-namespace Game {
+// ---------------------------------------------------------------------------
+// MonsterInfo — flat, pre-resolved struct built once per tick per entity.
+// All expensive reads (components, path) happen in NearbyMonsterCache,
+// not in the query. This is the hot path.
+// ---------------------------------------------------------------------------
+struct MonsterInfo {
+    uint32_t    id               = 0;
 
-// Parse monster data from the game snapshot
-// Returns vector of RadarEntities filtered to monsters only
-std::vector<PluginSDK::RadarEntity> ParseMonsters(
-    void* context,
-    const void* snapshot);
+    // Grid-space position (same coordinate system as player grid pos)
+    float       gridX            = 0.0f;
+    float       gridY            = 0.0f;
 
-// Extract buffs for a single entity from its component data
-std::vector<PluginSDK::PluginBuffData> ExtractBuffs(
-    void* context,
-    uintptr_t entityAddress);
+    // Distances (computed during cache build)
+    float       distanceToPlayer = 0.0f;   // euclidean on grid coords
+    float       distanceToCursor = 0.0f;   // euclidean on grid coords
 
-// Check if an entity path represents a monster/enemy
-bool IsMonsterEntity(const std::string& path);
+    // Entity classification
+    int         rarity           = 0;      // 0=Normal 1=Magic 2=Rare 3=Unique
+    uint8_t     reaction         = 0;      // 0=Hostile 1=Neutral 2=Friendly
 
-// Convenience: check if a RadarEntity is a monster
-inline bool IsMonster(const PluginSDK::RadarEntity& e) {
-    return e.entityType == PluginSDK::EntityTypes::Monster ||
-           e.entityType == PluginSDK::EntityTypes::NPC;
-}
+    // Path string from RadarEntity.Path (e.g. "Enemies/Unique/...")
+    std::string path;
 
-// Convenience: health percentage from RadarEntity
-inline float HealthPercent(const PluginSDK::RadarEntity& e) {
-    return e.MaxHP > 0 ? (float)e.CurrentHP / (float)e.MaxHP * 100.0f : 0.0f;
-}
+    // Health (from Life component)
+    float       healthPct        = 0.0f;   // 0.0 - 1.0
+    float       hp               = 0.0f;
+    float       maxHp            = 0.0f;
 
-// Convenience: is entity alive
-inline bool IsAlive(const PluginSDK::RadarEntity& e) {
-    return e.CurrentHP > 0 && !e.IsSleeping;
-}
+    // Targetable component
+    bool        isTargeted       = false;
+    bool        isTargetable     = false;
 
-} // namespace Game
-} // namespace AutoReflex
+    // Actor component
+    bool        isUsingAbility   = false;
+
+    // Buffs (from Buffs component, stored as unordered_set for O(1) lookup)
+    std::unordered_set<std::string> buffNames;
+};
+
+}} // namespace AutoReflex::Game
