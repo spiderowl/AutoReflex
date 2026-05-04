@@ -41,6 +41,9 @@ public:
     // Check if the engine is ready
     bool IsInitialized() const { return engine != nullptr; }
 
+    // Get the raw AngelScript engine pointer
+    asIScriptEngine* GetEngine() const { return engine; }
+
     // Get last error message
     const std::string& GetLastError() const { return lastError; }
 

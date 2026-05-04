@@ -6,12 +6,22 @@
 #include "sdk/PluginHelpers.h"
 #include "core/ShouldExecute.h"
 #include "game/KeySender.h"
+#include "game/ConditionState.h"
+#include "rules/RuleManager.h"
+#include "storage/RuleStore.h"
+#include "storage/SettingsStore.h"
+#include "scripting/ScriptEngine.h"
 #include "ui/EntityList.h"
 #include "ui/EntityDetail.h"
+#include "ui/SettingsPanel.h"
+#include "ui/RuleList.h"
+#include "ui/RuleEditor.h"
+#include "ui/Overlay.h"
 
 #include <imgui.h>
 #include <sstream>
 #include <iomanip>
+#include <filesystem>
 
 using namespace PluginSDK;
 
@@ -42,25 +52,56 @@ void AutoReflexPlugin::SetContext(PluginContext* context) {
     }
 }
 
-void AutoReflexPlugin::OnEnable(bool /*isGameOpened*/) {
-    // Plugin enabled
+void AutoReflexPlugin::OnEnable(bool isGameOpened) {
+    // Phase 4: Initialize AngelScript engine
+    if (!m_ScriptEngine.IsInitialized()) {
+        m_ScriptEngine.Initialize();
+        Log("AngelScript engine initialized");
+    }
+
+    // Phase 7: Create subsystems
+    if (!m_RuleManager) {
+        m_RuleManager = std::make_unique<AutoReflex::Rules::RuleManager>(m_ScriptEngine.GetEngine());
+        Log("RuleManager created");
+    }
+
+    if (!m_RuleStore) {
+        std::string rulesDir = m_Directory + "/rules";
+        m_RuleStore = std::make_unique<AutoReflex::Storage::RuleStore>(rulesDir);
+        Log("RuleStore created");
+    }
+
+    if (!m_SettingsStore) {
+        m_SettingsStore = std::make_unique<AutoReflex::Storage::SettingsStore>(m_Context);
+        Log("SettingsStore created");
+    }
+
+    if (!m_ConditionState) {
+        m_ConditionState = std::make_unique<AutoReflex::Game::ConditionState>();
+        Log("ConditionState created");
+    }
+
+    // Phase 8: Load settings and rules
+    LoadSettings();
+
+    if (isGameOpened) {
+        Log("AutoReflex enabled (game open)");
+    } else {
+        Log("AutoReflex enabled (no game)");
+    }
 }
 
 void AutoReflexPlugin::OnDisable() {
-    // Plugin disabled
+    // Save everything on disable
+    SaveSettings();
+    Log("AutoReflex disabled");
 }
 
 void AutoReflexPlugin::DrawSettings() {
-    // Always visible when plugin is enabled (even without game open)
-    // Follows ExamplePlugin pattern: DrawSettings = configuration checkboxes
+    // Delegate to SettingsPanel (tabs: General, Rules, Rule Editor, Script Docs)
+    AutoReflex::UI::SettingsPanel::Draw(this);
 
-    // --- Test Fire (works without game) ---
-    ImGui::Checkbox("Test Fire (Q)", &m_TestFireEnabled);
-    ImGui::SameLine();
-    ImGui::Text("Cooldown: %.1fms", m_TestFireCooldownSec * 1000.f);
-    ImGui::SameLine();
-    ImGui::SliderFloat("##TestCooldown", &m_TestFireCooldownSec, 0.1f, 3.0f, "%.1fs");
-
+    // Keep test fire active in background (works even when settings not open)
     if (m_TestFireEnabled) {
         auto now = std::chrono::steady_clock::now();
         if (now - m_LastTestFire >= std::chrono::milliseconds(static_cast<uint32_t>(m_TestFireCooldownSec * 1000.0f))) {
@@ -69,39 +110,16 @@ void AutoReflexPlugin::DrawSettings() {
             Log("Pressed Q — test fire");
         }
     }
-
-    ImGui::Separator();
-
-    // --- Panel visibility toggles ---
-    ImGui::Text("Panels:");
-    ImGui::Checkbox("Debug Log", &m_ShowDebugLog);
-    ImGui::Checkbox("Show Entity List", &m_ShowEntityList);
-    ImGui::Checkbox("Show Monster Detail", &m_ShowMonsterDetail);
-
-    ImGui::Separator();
-
-    // --- Overlay options ---
-    ImGui::Checkbox("Enable Overlay", &m_OverlayEnabled);
-    ImGui::SliderFloat("Window Opacity", &m_WindowAlpha, 0.3f, 1.0f, "%.1f");
-
-    ImGui::Separator();
-
-    // --- Debug Log in settings panel ---
-    if (m_ShowDebugLog) {
-        ImGui::Text("Log (%zu entries):", m_DebugLog.size());
-        if (ImGui::SmallButton("Clear")) m_DebugLog.clear();
-        ImGui::SameLine();
-        ImVec2 logSize = ImGui::GetContentRegionAvail();
-        logSize.y = 120.0f;
-        ImGui::BeginChild("DebugLog", logSize, true);
-        for (const auto& entry : m_DebugLog) {
-            ImGui::TextUnformatted(entry.c_str());
-        }
-        ImGui::EndChild();
-    }
 }
 
-// T14/T15/T16/T20: DrawUI with selectable monster list + detail panel
+// Helper: convert key uint16 to string for logging
+static std::string KeyChar(uint16_t key) {
+    if (key == 0) return "None";
+    char buf[3] = {(char)key, '\0'};
+    return buf;
+}
+
+// T14/T15/T16/T20: DrawUI with selectable monster list + detail panel + rule evaluation
 void AutoReflexPlugin::DrawUI() {
     if (!m_Context || !m_Context->IsAttached()) return;
 
@@ -111,6 +129,20 @@ void AutoReflexPlugin::DrawUI() {
     // T17/T18/T19: Evaluate ShouldExecute and store result
     std::string statusReason;
     bool canExecute = AutoReflex::ShouldExecute(m_Context, statusReason);
+
+    // Phase 7+10: Evaluate all rules each frame (only when allowed)
+    m_RulesFiredThisFrame = 0;
+    if (canExecute && m_RuleManager && m_ConditionState) {
+        m_RuleManager->EvaluateAll(m_Context, *m_ConditionState,
+            [this](const AutoReflex::Rules::Rule& rule) {
+                // Fire: press the configured key
+                if (rule.Key > 0) {
+                    AutoReflex::Game::PressKey(static_cast<char>(rule.Key));
+                    m_RulesFiredThisFrame++;
+                    Log("Fired rule " + rule.Name + " (key=" + KeyChar(rule.Key) + ")");
+                }
+            });
+    }
 
     // T20: Status color coding
     ImVec4 statusColor;
@@ -210,7 +242,17 @@ void AutoReflexPlugin::Log(const std::string& msg)
 }
 
 void AutoReflexPlugin::SaveSettings() {
-    // Settings persistence - Phase 6
+    // Phase 8: Save settings and all rules
+    if (m_SettingsStore) {
+        m_SettingsStore->Save();
+    }
+
+    if (m_RuleStore) {
+        for (auto& rule : m_RuleManager->GetRules()) {
+            m_RuleStore->SaveRule(rule);
+        }
+        Log("All rules saved");
+    }
 }
 
 // ============================================================================
@@ -224,6 +266,15 @@ void AutoReflexPlugin::Tick(const std::shared_ptr<const PluginSDK::PluginGameSna
 }
 
 void AutoReflexPlugin::LoadSettings() {
+    // Phase 8: Load settings and rules
+    if (m_SettingsStore) {
+        m_SettingsStore->Load();
+    }
+
+    if (m_RuleStore && m_RuleManager) {
+        m_RuleManager->LoadRules(*m_RuleStore);
+        Log("Rules loaded: " + std::to_string(m_RuleManager->GetRules().size()));
+    }
 }
 
 void AutoReflexPlugin::DrawSettingsGeneral() {

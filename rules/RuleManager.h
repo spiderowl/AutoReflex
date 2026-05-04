@@ -1,5 +1,5 @@
 // AutoReflex - RuleManager
-// Manages collection of rules and evaluates them
+// Manages collection of rules, compiles scripts, evaluates conditions
 
 #pragma once
 #include "Rule.h"
@@ -9,6 +9,7 @@
 #include <memory>
 
 struct PluginContext;
+class asIScriptEngine;
 namespace AutoReflex { namespace Game { class ConditionState; }}
 namespace AutoReflex { namespace Storage { class RuleStore; }}
 
@@ -17,20 +18,29 @@ namespace Rules {
 
 class RuleManager {
 public:
-    explicit RuleManager(const std::string& dataDir);
-    
+    explicit RuleManager(asIScriptEngine* engine);
+    ~RuleManager();
+
+    // Load all rules from disk
     void LoadRules(Storage::RuleStore& store);
-    
+
+    // Compile a single rule's script into an AngelScript module
+    void CompileRule(Rule& rule);
+
+    // Evaluate all enabled rules; call onFire for each that fires
     void EvaluateAll(
         PluginContext* ctx,
         Game::ConditionState& conditionState,
         std::function<void(const Rule&)> onFire);
-    
+
     std::vector<Rule>& GetRules() { return m_Rules; }
     const std::vector<Rule>& GetRules() const { return m_Rules; }
 
+    // Selected rule index for UI
+    int SelectedRuleIndex = -1;
+
 private:
-    std::string m_DataDir;
+    asIScriptEngine* m_Engine = nullptr;
     std::vector<Rule> m_Rules;
 };
 

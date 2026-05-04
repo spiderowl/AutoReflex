@@ -1,30 +1,32 @@
 // AutoReflex - Rule
-// Defines a single automation rule
+// Defines a single automation rule with AngelScript condition
 
 #pragma once
 #include <string>
-#include <vector>
+#include <chrono>
+#include <cstdint>
+
+class asIScriptModule;
 
 namespace AutoReflex {
 namespace Rules {
 
-// Forward declaration (defined in RuleManager.cpp)
-struct BuffCondition {
-    std::string BuffNamePattern;  // e.g. "free_movement" or contains:free
-    bool MatchContains = true;    // true=contains match, false=exact match
-    bool RequirePresent = true;   // true=buff must be present, false=buff must be absent
-};
-
 struct Rule {
-    std::string Name;
-    bool Enabled = true;
-    std::vector<BuffCondition> BuffConditions;
-    float MinHealthPct = -1.0f;
-    float MaxHealthPct = 101.0f;
-    int MinMonsters = 1;
-    int MaxMonsters = -1;
-    std::string SimKey;       // Virtual key code string, e.g. "0x70" = P
-    std::string ConditionScript; // AngelScript condition
+    // User-editable fields (saved to disk)
+    std::string  Name;
+    bool         Enabled      = false;
+    uint16_t     Key          = 0;
+    float        CooldownSec  = 1.0f;     // Seconds between uses
+    float        WaitAfterPressMs = 50.0f; // Milliseconds to sleep after keypress (animation time)
+    int          Order        = 0;
+    std::string  ScriptBody;   // body only, no boilerplate
+
+    // Runtime fields (not saved)
+    asIScriptModule*                          Module       = nullptr;
+    std::string                               CompileError;
+    bool                                      LastEvalResult = false;
+    std::chrono::steady_clock::time_point     LastFired;
+    bool                                      EverFired    = false;
 };
 
 } // namespace Rules

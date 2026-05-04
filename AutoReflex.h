@@ -15,9 +15,14 @@
 #include "rules/RuleManager.h"
 #include "storage/RuleStore.h"
 #include "game/ConditionState.h"
-// Phase 8+: SettingsStore, ScriptEngine, ScriptBindings will be included here
+#include "storage/SettingsStore.h"
+#include "scripting/ScriptEngine.h"
+
+namespace AutoReflex { namespace UI { class SettingsPanel; }}
 
 class AutoReflexPlugin : public IPlugin {
+    friend class AutoReflex::UI::SettingsPanel;
+
 public:
     // --- IPlugin overrides ---
     void SetPluginDirectory(const char* dir) override;
@@ -58,7 +63,7 @@ private:
     std::string m_Directory;
 
     // --- Settings ---
-    bool m_OverlayEnabled = true;
+    bool m_OverlayEnabled = false;
     bool m_ShowStatusWindow = true;
     float m_WindowAlpha = 0.85f;
     int m_SimKeyMethod = 0;  // 0=SendInput, 1=SendKeyEvent, 2=RawKeyPress
@@ -66,10 +71,11 @@ private:
     float m_KeyHoldDuration = 0.05f;
 
     // --- Subsystems ---
+    ScriptEngine m_ScriptEngine;                          // Phase 4: AngelScript engine
     std::unique_ptr<AutoReflex::Rules::RuleManager> m_RuleManager;
     std::unique_ptr<AutoReflex::Storage::RuleStore> m_RuleStore;
+    std::unique_ptr<AutoReflex::Storage::SettingsStore> m_SettingsStore;
     std::unique_ptr<AutoReflex::Game::ConditionState> m_ConditionState;
-    // Phase 8+: m_SettingsStore, m_ScriptEngine, m_ScriptBindings
 
     // --- State ---
     uint64_t m_LastAreaChangeCounter = 0;
@@ -84,8 +90,8 @@ private:
     bool m_TestFireEnabled = false;  // Toggle in DrawSettings
 
     // --- Panel visibility ---
-    bool m_ShowEntityList = true;
-    bool m_ShowMonsterDetail = true;
+    bool m_ShowEntityList = false;
+    bool m_ShowMonsterDetail = false;
 
     // --- T23: Debug log ---
     std::vector<std::string> m_DebugLog;
