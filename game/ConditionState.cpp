@@ -21,7 +21,7 @@ void ConditionState::ResetOnAreaChange()
 
 int ConditionState::CountMonstersWithBuff(const std::string& buffName) const
 {
-    return Monsters(cache_).HasBuff(buffName).Count();
+    return CachedMonsters(cache_).HasBuff(buffName).Count();
 }
 
 } // namespace Game

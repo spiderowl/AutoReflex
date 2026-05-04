@@ -6,19 +6,21 @@
 #include <functional>
 #include <vector>
 #include <optional>
+#include <string>
+#include <memory>
 
 namespace AutoReflex { namespace Game {
 
 // ---------------------------------------------------------------------------
-// MonsterQuery — fluent builder over NearbyMonsterCache.
+// CachedMonsters — fluent builder over NearbyMonsterCache.
 //
 // Usage:
 //   auto cache = NearbyMonsterCache();
 //   cache.Rebuild(ctx, snap, cursorGrid);
 //
-//   if (Monsters(cache).WithinRange(50).Hostile().Any()) { ... }
-//   auto nearest = Monsters(cache).WithinRange(100).Nearest();
-//   int cnt = Monsters(cache).Rarity(MonsterRarityFlag::RarityUnique).Count();
+//   if (CachedMonsters(cache).WithinRange(50).Hostile().Any()) { ... }
+//   auto nearest = CachedMonsters(cache).WithinRange(100).Nearest();
+//   int cnt = CachedMonsters(cache).Rarity(MonsterRarityFlag::RarityUnique).Count();
 //
 // All filtering is lazy — the cache is scanned only when a terminal
 // (Any, Count, Nearest, NearestToCursor, All) is called.
@@ -27,9 +29,6 @@ namespace AutoReflex { namespace Game {
 // itself has zero heap allocations.  The .All() terminal returns a vector.
 // ---------------------------------------------------------------------------
 
-// Forward declaration
-class Monsters;
-
 // ---------------------------------------------------------------------------
 // Predicate storage — kept as thin pointers to avoid virtual dispatch
 // overhead on the hot path.  Each filter mutates the internal predicate list.
@@ -37,60 +36,60 @@ class Monsters;
 using MonsterPredicate = std::function<bool(const MonsterInfo&)>;
 
 // ---------------------------------------------------------------------------
-// Monsters — fluent query builder
+// CachedMonsters — fluent query builder
 // ---------------------------------------------------------------------------
-class Monsters {
+class CachedMonsters {
 public:
     // Entry point: construct from a cache reference.
-    explicit Monsters(const NearbyMonsterCache& cache);
+    explicit CachedMonsters(const NearbyMonsterCache& cache);
 
     // ---- Range filters ----
 
     // Distance to player (in grid units)
-    Monsters& WithinRange(float maxDistance);
+    CachedMonsters& WithinRange(float maxDistance);
 
     // Distance to cursor (in grid units)
-    Monsters& NearCursor(float maxDistance);
+    CachedMonsters& NearCursor(float maxDistance);
 
     // ---- Reaction filters ----
 
     // reaction == 0 (Hostile)
-    Monsters& Hostile();
+    CachedMonsters& Hostile();
 
     // reaction == 2 (Friendly)
-    Monsters& Friendly();
+    CachedMonsters& Friendly();
 
     // ---- Rarity filter ----
     // rarityMask is a bitmask: RarityNormal|RarityMagic|RarityRare|RarityUnique
     // Only monsters whose (1 << rarity) matches a bit in mask are kept.
-    Monsters& Rarity(int rarityMask);
+    CachedMonsters& Rarity(int rarityMask);
 
     // ---- Path filter ----
     // Keep monsters whose path contains the substring (case-insensitive).
-    Monsters& PathContains(const std::string& substring);
+    CachedMonsters& PathContains(const std::string& substring);
 
     // ---- Buff filters ----
 
     // Keep monsters that have at least one of the listed buff names.
-    Monsters& HasBuff(const std::string& buffName);
+    CachedMonsters& HasBuff(const std::string& buffName);
 
     // Keep monsters that have NONE of the listed buff names.
     // (Stack call: .NotHasBuff("immortal").NotHasBuff("shield"))
-    Monsters& NotHasBuff(const std::string& buffName);
+    CachedMonsters& NotHasBuff(const std::string& buffName);
 
     // ---- Target filter ----
-    Monsters& IsTargeted();
+    CachedMonsters& IsTargeted();
 
     // ---- Health filters ----
 
-    Monsters& MinHealthPct(float minPct);   // healthPct >= minPct
-    Monsters& MaxHealthPct(float maxPct);   // healthPct <= maxPct
+    CachedMonsters& MinHealthPct(float minPct);   // healthPct >= minPct
+    CachedMonsters& MaxHealthPct(float maxPct);   // healthPct <= maxPct
 
     // ---- Ability filter ----
-    Monsters& IsUsingAbility();
+    CachedMonsters& IsUsingAbility();
 
     // ---- Custom predicate ----
-    Monsters& Where(MonsterPredicate pred);
+    CachedMonsters& Where(MonsterPredicate pred);
 
     // ---- Terminals ----
 
@@ -114,5 +113,70 @@ private:
     const NearbyMonsterCache& cache_;
     std::vector<MonsterPredicate> predicates_;
 };
+
+// ============================================================================
+// Snapshot-based fluent builder (requested API)
+// ============================================================================
+
+enum class MinRarity : uint8_t {
+    Any    = 0,
+    Magic  = 1,
+    Rare   = 2,
+    Unique = 3,
+};
+
+class MonsterQuery {
+public:
+    MonsterQuery(PluginContext* ctx,
+                 std::shared_ptr<const PluginSDK::PluginGameSnapshot> snap);
+
+    // Builder methods
+    MonsterQuery& WithinRange(float gridUnits);
+    MonsterQuery& NearCursor(float pixels);
+    MonsterQuery& InZone(PluginSDK::NearbyZone zone);
+
+    MonsterQuery& Magic();
+    MonsterQuery& Rare();
+    MonsterQuery& Unique();
+    MonsterQuery& AtLeast(MinRarity rarity);
+
+    MonsterQuery& WithAllBuffs(std::vector<std::string> buffNames);
+    MonsterQuery& WithAnyBuff(std::vector<std::string> buffNames);
+
+    // Path substring match (case-insensitive). Uses `RadarEntity.Path` only.
+    MonsterQuery& PathContains(std::string needle);
+
+    MonsterQuery& IncludeFriendly();
+    MonsterQuery& IncludeSleeping();
+
+    MonsterQuery& Where(std::function<bool(const PluginSDK::RadarEntity&)> pred);
+
+    // Terminal methods
+    bool Any();
+    int Count();
+    const PluginSDK::RadarEntity* Nearest();
+    std::vector<const PluginSDK::RadarEntity*> All();
+
+private:
+    PluginContext*                              m_Ctx;
+    std::shared_ptr<const PluginSDK::PluginGameSnapshot>  m_Snap;
+
+    // Filter state
+    std::optional<float>                       m_MaxRange;
+    std::optional<float>                       m_CursorRange;
+    std::optional<PluginSDK::NearbyZone>       m_Zone;
+    MinRarity                                  m_MinRarity    = MinRarity::Any;
+    std::vector<std::string>                   m_RequiredBuffs;
+    std::vector<std::string>                   m_AnyOfBuffs;
+    std::string                                m_PathNeedle;
+    bool                                       m_HostileOnly  = true;
+    bool                                       m_ExcludeSleep = true;
+    std::function<bool(const PluginSDK::RadarEntity&)>    m_Predicate;
+
+    bool PassesFilter(const PluginSDK::RadarEntity& e) const;
+};
+
+MonsterQuery Monsters(PluginContext* ctx,
+                      const std::shared_ptr<const PluginSDK::PluginGameSnapshot>& snap);
 
 }} // namespace AutoReflex::Game

@@ -41,10 +41,6 @@
     <IntDir>$(ProjectDir)obj\Debug\</IntDir>
     <TargetName>AutoReflex</TargetName>
   </PropertyGroup>
-  <PropertyGroup Label="VcpkgRoot">
-    <VcpkgRoot>C:\auto_help\vcpkg</VcpkgRoot>
-    <VcpkgInstalled>$(VcpkgRoot)\installed\x64-windows</VcpkgInstalled>
-  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -56,12 +52,11 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ProjectDir)scripting;$(VcpkgInstalled)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(VcpkgInstalled)\lib;$(VcpkgInstalled)\lib\x64-windows;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
@@ -75,12 +70,11 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ProjectDir)scripting;$(VcpkgInstalled)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(VcpkgInstalled)\debug\lib;$(VcpkgInstalled)\debug\lib\x64-windows;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>

@@ -19,6 +19,8 @@
 // EXPRTK is header-only - include the single header
 #include "exprtk.hpp"
 
+struct PluginContext;
+
 // Forward declarations replaced by direct includes above
 
 // ============================================================================
@@ -35,7 +37,8 @@ public:
 
     // Evaluate the expression against a RadarEntity; returns the boolean result
     // cursorX/cursorY are grid-coordinate position of the mouse cursor
-    bool Evaluate(const PluginSDK::RadarEntity& entity,
+    bool Evaluate(PluginContext* ctx,
+                  const PluginSDK::RadarEntity& entity,
                   double cursorX, double cursorY) const;
 
     // Check if this expression is valid
@@ -44,8 +47,18 @@ public:
     // Get the source expression string
     const std::string& GetExpressionString() const { return exprString_; }
 
+    // Internal helpers used by EXPRTK thunks (registered functions).
+    bool HasBuffIdx(int idx) const;
+    double HasBuffValueIdx(int idx) const;
+    bool PathContainsIdx(int idx) const;
+
 private:
     std::string exprString_;
+    std::string compiledString_;
+
+    // Preprocessed needles referenced by hasBuffIdx()/pathContainsIdx()
+    std::vector<std::string> buffNeedles_;
+    std::vector<std::string> pathNeedles_;
 
     // EXPRTK uses smart pointers internally for expression nodes
     std::unique_ptr<exprtk::expression<double>> expression_;
@@ -56,6 +69,7 @@ private:
     mutable double e_Id;
     mutable double e_IsValid;
     mutable double e_Rarity;
+    mutable double e_Zone;
     mutable double e_GridPositionX;
     mutable double e_GridPositionY;
     mutable double e_GridPositionZ;
@@ -67,10 +81,23 @@ private:
     mutable double e_CurrentES;
     mutable double e_MaxES;
     mutable double e_IsSleeping;
+    mutable double e_CursorDistPx;
+    mutable double e_Reaction;
+    mutable double e_IsTargetable;
 
     // Context variables (set per-evaluation, e.g. cursor position)
     mutable double curX;
     mutable double curY;
+
+    // Evaluation context for custom functions (mutable to allow const Evaluate)
+    mutable PluginContext* curCtx_ = nullptr;
+    mutable const PluginSDK::RadarEntity* curEnt_ = nullptr;
+    mutable std::vector<int8_t> buffResultCache_; // -1 unknown, 0 false, 1 true
+    mutable std::vector<int16_t> buffValueCache_; // -32768 unknown, else charges/value (or 0 if absent)
+    mutable std::vector<int8_t> pathResultCache_; // -1 unknown, 0 false, 1 true
+
+    // (reserved for future snapshot-wide helpers)
+
 };
 
 // ============================================================================

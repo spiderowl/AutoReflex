@@ -142,6 +142,23 @@ return s.Monsters.Inner.Rare >= 3 && s.Monsters.Outer.Unique >= 1;
 
 ---
 
+## Canonical OuterCircle query (C++ fluent builder)
+
+When you need **strict-SDK OuterCircle** logic in C++ (uses `RadarEntity.Zone == NearbyZone::OuterCircle` and near-cursor via `WorldToScreen + ImGui::GetMousePos()`), use the snapshot-based fluent builder in `game/MonsterQuery.h`:
+
+```cpp
+auto snap = m_Ctx->GetSnapshot();
+
+bool hit = AutoReflex::Game::Monsters(m_Ctx, snap)
+    .InZone(PluginSDK::NearbyZone::OuterCircle)
+    .NearCursor(200.f)                       // pixels
+    .WithAnyBuff({ "poison" })
+    .PathContains("skeleton")                // RadarEntity.Path only
+    .Count() > 0;
+```
+
+---
+
 ## File + Folder Structure
 
 ```

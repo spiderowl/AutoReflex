@@ -18,10 +18,3 @@ plugins_data/
 ## OS files
 Thumbs.db
 .DS_Store
-
-## AngelScript (installed via vcpkg, not bundled)
-angelscript_2.38.0/
-
-## Test projects build outputs
-test_as/x64/
-test_as/obj/

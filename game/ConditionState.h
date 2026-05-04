@@ -29,7 +29,7 @@ public:
     int CountMonstersWithBuff(const std::string& buffName) const;
 
     // Convenience: run a Monsters query (syntactic sugar)
-    Monsters Query() const { return Monsters(cache_); }
+    CachedMonsters Query() const { return CachedMonsters(cache_); }
 
     // Cursor position in grid coordinates (for EXPRTK expressions)
     Vector2f CursorPos() const { return cursorGridPos_; }

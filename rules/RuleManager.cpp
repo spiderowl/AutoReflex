@@ -130,7 +130,7 @@ void RuleManager::EvaluateAll(
             if (!entity.IsValid) continue;
 
             // Evaluate the EXPRTK expression against this entity
-            if (rule.CompiledExpr->Evaluate(entity, curX, curY)) {
+            if (rule.CompiledExpr->Evaluate(ctx, entity, curX, curY)) {
                 conditionMet = true;
                 break;
             }

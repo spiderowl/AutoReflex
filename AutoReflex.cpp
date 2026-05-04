@@ -137,7 +137,8 @@ void AutoReflexPlugin::DrawUI() {
                                  AutoReflex::Game::Vector2f{0.0f, 0.0f});
     }
 
-    // Phase 7+10: Evaluate all rules each frame (only when allowed)
+    // Phase 7+10: Evaluate all rules each frame (only when allowed).
+    // IMPORTANT: rule execution is NOT tied to overlay rendering.
     m_RulesFiredThisFrame = 0;
     if (canExecute && m_RuleManager && m_ConditionState) {
         m_RuleManager->EvaluateAll(m_Context, *m_ConditionState,
@@ -150,6 +151,10 @@ void AutoReflexPlugin::DrawUI() {
                 }
             });
     }
+
+    // If overlay is disabled, do not draw any windows — but rules still run above.
+    if (!m_OverlayEnabled) return;
+    if (m_Context->IsOverlayMode && !m_Context->IsOverlayMode()) return;
 
     // T20: Status color coding
     ImVec4 statusColor;
