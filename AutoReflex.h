@@ -1,5 +1,7 @@
 // AutoReflex - POEFixer Plugin
-// Main plugin class implementing IPlugin
+// Headless automation plugin: a settings UI for editing rules, plus a
+// background tick (DrawUI) that evaluates rules and synthesizes key presses.
+// There is intentionally no in-game overlay window.
 
 #pragma once
 
@@ -10,16 +12,14 @@
 #include <memory>
 #include <chrono>
 
-// Include full headers for types used with std::unique_ptr (complete type required for destruction)
-// Phase 1: only RuleManager, RuleStore, and ConditionState have actual class definitions
 #include "rules/RuleManager.h"
 #include "storage/RuleStore.h"
-#include "game/ConditionState.h"
 #include "storage/SettingsStore.h"
 #include "scripting/ScriptEngine.h"
+#include "core/EvalThrottle.h"
 
-namespace AutoReflex { namespace UI { class SettingsPanel; }}
-namespace AutoReflex { namespace Storage { class SettingsStore; }}
+namespace AutoReflex { namespace UI      { class SettingsPanel; } }
+namespace AutoReflex { namespace Storage { class SettingsStore; } }
 
 class AutoReflexPlugin : public IPlugin {
     friend class AutoReflex::UI::SettingsPanel;
@@ -34,79 +34,36 @@ public:
     void DrawSettings() override;
     void DrawUI() override;
     void SaveSettings() override;
-    const char* GetName() override { return "AutoReflex"; }
-    int GetSDKVersion() override { return PLUGIN_SDK_VERSION; }
-    bool WantsOverlay() override { return m_OverlayEnabled; }
+    const char* GetName() override   { return "AutoReflex"; }
+    int  GetSDKVersion() override    { return PLUGIN_SDK_VERSION; }
+    // Always true: DrawUI is our background tick for rule evaluation, even
+    // though it draws no visible window.
+    bool WantsOverlay() override     { return true; }
 
 private:
-    // --- Initialization ---
-    void Initialize();
-
-    // --- Tick: called every frame when overlay is visible ---
-    void Tick(const std::shared_ptr<const PluginSDK::PluginGameSnapshot>& snapshot);
-
-    // --- Settings persistence ---
     void LoadSettings();
 
-    // --- Settings UI ---
-    void DrawSettingsGeneral();
-    void DrawSettingsRuleList();
-    void DrawSettingsRuleEditor();
-    void DrawSettingsScriptDocs();
-
-    // --- Overlay UI ---
-    void DrawOverlayStatusWindow();
-
-    // --- Context helper ---
-    PluginContext* Context() const { return m_Context; }
-
-    // --- Members ---
+    // --- Host context ---
     PluginContext* m_Context = nullptr;
-    std::string m_Directory;
+    std::string    m_Directory;
 
-    // --- Settings ---
-    bool m_OverlayEnabled = false;
-    bool m_ShowStatusWindow = true;
-    float m_WindowAlpha = 0.85f;
-    int m_SimKeyMethod = 0;  // 0=SendInput, 1=SendKeyEvent, 2=RawKeyPress
-    float m_GlobalCooldown = 0.5f;
-    float m_KeyHoldDuration = 0.05f;
+    // --- Persisted settings (config/settings.json) ---
+    // Rule evaluation pacing. Default ~60 Hz so 144 Hz monitors don't pay
+    // 144 Hz worth of host calls when 60 Hz is more than enough.
+    int m_EvalIntervalMs = 16;
 
     // --- Subsystems ---
-    ScriptEngine m_ScriptEngine;                          // EXPRTK expression engine
-    std::unique_ptr<AutoReflex::Rules::RuleManager> m_RuleManager;
-    std::unique_ptr<AutoReflex::Storage::RuleStore> m_RuleStore;
+    ScriptEngine                                        m_ScriptEngine;
+    std::unique_ptr<AutoReflex::Rules::RuleManager>     m_RuleManager;
+    std::unique_ptr<AutoReflex::Storage::RuleStore>     m_RuleStore;
     std::unique_ptr<AutoReflex::Storage::SettingsStore> m_SettingsStore;
-    std::unique_ptr<AutoReflex::Game::ConditionState> m_ConditionState;
+    AutoReflex::Core::EvalThrottle                      m_EvalThrottle;
 
-    // --- State ---
-    uint64_t m_LastAreaChangeCounter = 0;
-    std::chrono::steady_clock::time_point m_GlobalCooldownExpiry;
-    bool m_CooldownActive = false;
-    int m_RulesFiredThisFrame = 0;
-    std::string m_StatusMsg;  // T20: current status message for overlay
-
-    // --- T22: Test fire cooldown ---
+    // --- "Test Fire" affordance in the Settings tab ---
+    bool                                  m_TestFireEnabled     = false;
+    float                                 m_TestFireCooldownSec = 0.8f;
     std::chrono::steady_clock::time_point m_LastTestFire;
-    float m_TestFireCooldownSec = 0.8f;  // 800ms between test fires
-    bool m_TestFireEnabled = false;  // Toggle in DrawSettings
 
-    // --- Panel visibility ---
-    bool m_ShowEntityList = false;
-    bool m_ShowMonsterDetail = false;
-
-    // --- T23: Debug log ---
-    std::vector<std::string> m_DebugLog;
-    static constexpr size_t DEBUG_LOG_MAX = 200;
-    void Log(const std::string& msg);
-
-    // --- UI state ---
+    // --- UI selection state (transient, not persisted) ---
     int m_SelectedRuleIndex = -1;
-    bool m_ShowRuleEditor = false;
-    int m_SettingsTab = 0;  // 0=General, 1=Rules, 2=Script Docs
-    bool m_ShowDebugLog = false;  // Toggle debug log visibility (overlay window)
-    bool m_DebugLogTabEnabled = false;  // Settings tab "Debug Log": show log viewer when true
-    int m_SelectedMonsterIdx = -1;  // Selected monster index in overlay list
-    uint32_t m_WatchedEntityId = 0;  // Entity being watched for detailed component data
-    int m_WatchFrameCounter = 0;  // Frames since entity was watched (for diagnostics)
 };

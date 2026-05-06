@@ -30,33 +30,6 @@ std::string RuleStore::escapeJson(const std::string& s) {
     return out;
 }
 
-std::string RuleStore::unescapeJson(const std::string& s) {
-    std::string out;
-    out.reserve(s.size());
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (s[i] == '\\' && i + 1 < s.size()) {
-            switch (s[i + 1]) {
-                case '\"': out += '\"'; ++i; break;
-                case '\\': out += '\\'; ++i; break;
-                case 'n':  out += '\n'; ++i; break;
-                case 'r':  out += '\r'; ++i; break;
-                case 't':  out += '\t'; ++i; break;
-                default:   out += s[i]; break;
-            }
-        } else {
-            out += s[i];
-        }
-    }
-    return out;
-}
-
-std::string RuleStore::trim(const std::string& s) {
-    auto start = s.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return "";
-    auto end = s.find_last_not_of(" \t\r\n");
-    return s.substr(start, end - start + 1);
-}
-
 std::string RuleStore::ruleFilePath(const std::string& rulesDir, const std::string& name) {
     return rulesDir + "/" + name + ".json";
 }
@@ -175,7 +148,15 @@ bool RuleStore::LoadRule(const std::string& name, Rules::Rule& outRule) const {
 
     outRule.Name = nameVal.empty() ? name : nameVal;
     outRule.Enabled = (enabledVal == "true");
-    outRule.Key = keyVal.empty() ? 0 : static_cast<unsigned char>(std::stoi(keyVal));
+    if (keyVal.empty()) {
+        outRule.Key = 0;
+    } else {
+        int k = 0;
+        try { k = std::stoi(keyVal); } catch (...) { k = 0; }
+        if (k < 0) k = 0;
+        if (k > 0xFFFF) k = 0xFFFF;
+        outRule.Key = static_cast<uint16_t>(k);
+    }
     outRule.CooldownSec = cdVal.empty() ? 0.5f : std::stof(cdVal);
     std::string waitMsVal;
     parseJsonValue(content, "WaitAfterPressMs", waitMsVal);

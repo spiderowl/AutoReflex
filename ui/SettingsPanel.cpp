@@ -1,5 +1,9 @@
-/*  */// AutoReflex - SettingsPanel.cpp
-// Full settings panel with General, Rules, Rule Editor, Script Docs tabs
+// AutoReflex - SettingsPanel.cpp
+// Settings panel with tabs: Rules, Settings.
+//
+// Text inputs bind directly to std::string via ImGuiInputTextFlags_CallbackResize
+// so we don't pay for a 16 KB stack copy + std::string assign on every frame
+// the editor is open.
 
 #include "SettingsPanel.h"
 #include "../AutoReflex.h"
@@ -7,61 +11,51 @@
 #include "../storage/RuleStore.h"
 
 #include <imgui.h>
-#include <sstream>
+#include <imgui_stdlib.h>
+
 #include <algorithm>
-#include <chrono>
 
 namespace AutoReflex {
 namespace UI {
 
-// ── Key name helper ──
-static const char* KeyToString(uint16_t key) {
-    if (key == 0) return "None";
-    char buf[8] = {0};
-    buf[0] = (char)key;
-    return buf;
+namespace {
+
+// Wrappers around ImGui's official std::string adapter (imgui_stdlib).
+// Both bind directly to the std::string and use the resize callback under
+// the hood — no per-frame stack buffers, no extra copies.
+bool InputStringMultiline(const char* label, std::string& s, const ImVec2& size) {
+    return ImGui::InputTextMultiline(label, &s, size);
+}
+bool InputString(const char* label, std::string& s, ImGuiInputTextFlags flags = 0) {
+    return ImGui::InputText(label, &s, flags);
 }
 
-static uint16_t CharToKey(char c) {
-    return static_cast<uint16_t>(static_cast<unsigned char>(c));
-}
+} // namespace
 
-// ── New rule factory ──
 Rules::Rule SettingsPanel::CreateNewRule(const std::string& name) {
     Rules::Rule rule;
-    rule.Name = name;
-    rule.Enabled = false;
-    rule.Key = CharToKey('Q');
+    rule.Name        = name;
+    rule.Enabled     = false;
+    rule.Key         = static_cast<uint16_t>('Q');
     rule.CooldownSec = 1.0f;
-    rule.Order = 0;
-    rule.ScriptBody = "// EXPRTK boolean expression (always true test)\n"
-                      "// Available: e_IsValid, e_CurrentHP, e_MaxHP, e_IsSleeping, e_WorldX, e_WorldY, etc.\n"
-                      "1";
+    rule.Order       = 0;
+    rule.ScriptBody  = "monsterCount > 0";
     return rule;
 }
 
-// ── Main Draw (inline - no window, renders inside host settings) ──
 void SettingsPanel::Draw(AutoReflexPlugin* plugin) {
     if (!plugin) return;
 
-    // Restrict content width so sliders/buttons aren't clipped at right edge
-    float rightMargin = 60.0f;
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, ImGui::GetStyle().ItemSpacing.y));
-
-    // Tab bar: Rules, Settings, Debug Log
-    static const char* tabs[] = {"Rules", "Settings", "Debug Log"};
-    static int currentTab = 0;
+    constexpr float kRightMargin = 60.0f;
+    static const char* const kTabs[] = { "Rules", "Settings" };
 
     if (ImGui::BeginTabBar("SettingsTabs", ImGuiTabBarFlags_None)) {
-        for (int i = 0; i < 3; i++) {
-            if (ImGui::BeginTabItem(tabs[i])) {
-                currentTab = i;
-                // Offset content to leave right margin
-                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - rightMargin);
+        for (int i = 0; i < IM_ARRAYSIZE(kTabs); ++i) {
+            if (ImGui::BeginTabItem(kTabs[i])) {
+                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - kRightMargin);
                 switch (i) {
-                    case 0: DrawRulesCombined(plugin, rightMargin); break;
-                    case 1: DrawGeneralTab(plugin, rightMargin); break;
-                    case 2: DrawDebugLogTab(plugin, rightMargin); break;
+                    case 0: DrawRulesCombined(plugin, kRightMargin); break;
+                    case 1: DrawGeneralTab   (plugin, kRightMargin); break;
                 }
                 ImGui::PopItemWidth();
                 ImGui::EndTabItem();
@@ -69,45 +63,34 @@ void SettingsPanel::Draw(AutoReflexPlugin* plugin) {
         }
         ImGui::EndTabBar();
     }
-
-    ImGui::PopStyleVar();
 }
 
-// ── General Tab ──
 void SettingsPanel::DrawGeneralTab(AutoReflexPlugin* plugin, float rightMargin) {
-    // We access plugin members via friend-like approach
-    // These settings are on AutoReflexPlugin as public-accessible through DrawSettings
-
     ImGui::Text("AutoReflex Settings");
     ImGui::Separator();
     ImGui::Spacing();
 
-    ImGui::Checkbox("Enable Overlay", &plugin->m_OverlayEnabled);
-
-    // Sliders: label column + slider column. This prevents overlap and keeps
-    // a consistent right-side margin so sliders don't touch the edge.
     if (ImGui::BeginTable("GeneralSliders", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX)) {
         ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 160.0f);
         ImGui::TableSetupColumn("Control", ImGuiTableColumnFlags_WidthStretch);
 
-        auto sliderRow = [&](const char* label, const char* id, float* v, float v_min, float v_max, const char* fmt) {
+        auto sliderInt = [&](const char* label, const char* id, int* v, int v_min, int v_max, const char* fmt) {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(label);
-
             ImGui::TableSetColumnIndex(1);
             float w = ImGui::GetContentRegionAvail().x - rightMargin;
             if (w < 40.0f) w = 40.0f;
             ImGui::SetNextItemWidth(w);
-            ImGui::SliderFloat(id, v, v_min, v_max, fmt);
+            ImGui::SliderInt(id, v, v_min, v_max, fmt);
             ImGui::SameLine(0.0f, 0.0f);
             ImGui::Dummy(ImVec2(rightMargin, 0.0f));
         };
 
-        sliderRow("Window Opacity", "##WindowOpacity", &plugin->m_WindowAlpha, 0.3f, 1.0f, "%.2f");
-        sliderRow("Global Cooldown", "##GlobalCooldown", &plugin->m_GlobalCooldown, 0.1f, 3.0f, "%.2fs");
-        sliderRow("Key Hold Duration", "##KeyHoldDuration", &plugin->m_KeyHoldDuration, 0.01f, 0.2f, "%.3fs");
+        // Eval interval: how often EvaluateAll runs, regardless of FPS.
+        // Lower = lower latency; higher = less CPU. 16ms = ~60 Hz.
+        sliderInt("Eval Interval (ms)", "##EvalIntervalMs",  &plugin->m_EvalIntervalMs,  0, 100, "%d ms");
 
         ImGui::EndTable();
     }
@@ -117,27 +100,10 @@ void SettingsPanel::DrawGeneralTab(AutoReflexPlugin* plugin, float rightMargin) 
     ImGui::SameLine();
     ImGui::Text("Cooldown: %.1fms", plugin->m_TestFireCooldownSec * 1000.f);
 
-    if (plugin->m_TestFireEnabled) {
-        auto now = std::chrono::steady_clock::now();
-        if (now - plugin->m_LastTestFire >= std::chrono::milliseconds(static_cast<uint32_t>(plugin->m_TestFireCooldownSec * 1000.0f))) {
-            // Press key is handled in DrawSettings already, but keep here as fallback
-        }
-    }
-
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
-    ImGui::Text("Panels:");
-    ImGui::Checkbox("Show Entity List", &plugin->m_ShowEntityList);
-    ImGui::Checkbox("Show Monster Detail", &plugin->m_ShowMonsterDetail);
-    ImGui::Checkbox("Show Debug Log", &plugin->m_ShowDebugLog);
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // Save / Load buttons
     if (ImGui::Button("Save All", ImVec2(100, 0))) {
         plugin->SaveSettings();
     }
@@ -147,39 +113,6 @@ void SettingsPanel::DrawGeneralTab(AutoReflexPlugin* plugin, float rightMargin) 
     }
 }
 
-// ── Debug Log tab (same ring buffer as overlay `Log()`) ──
-void SettingsPanel::DrawDebugLogTab(AutoReflexPlugin* plugin, float /*rightMargin*/) {
-    ImGui::TextUnformatted("Runtime messages from Log() (rules, keys, load, etc.).");
-    ImGui::Spacing();
-
-    if (ImGui::Checkbox("Enable##DebugLogTab", &plugin->m_DebugLogTabEnabled)) {
-        // toggled
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("(turn on to show the log below)");
-
-    if (!plugin->m_DebugLogTabEnabled)
-        return;
-
-    ImGui::Separator();
-    ImGui::Text("Entries: %zu (max %zu)", plugin->m_DebugLog.size(), (size_t)AutoReflexPlugin::DEBUG_LOG_MAX);
-    if (ImGui::SmallButton("Clear##DebugLogTab")) {
-        plugin->m_DebugLog.clear();
-    }
-
-    ImVec2 avail = ImGui::GetContentRegionAvail();
-    avail.y = std::max(120.0f, avail.y - ImGui::GetStyle().ItemSpacing.y);
-    ImGui::BeginChild("DebugLogTabScroll", avail, true, ImGuiWindowFlags_HorizontalScrollbar);
-    for (const auto& entry : plugin->m_DebugLog) {
-        ImGui::TextUnformatted(entry.c_str());
-    }
-    if (plugin->m_DebugLog.empty()) {
-        ImGui::TextDisabled("No messages yet. Enable the plugin and use rules / overlay to generate log lines.");
-    }
-    ImGui::EndChild();
-}
-
-// ── Combined Rules Tab: rule list split 50/50 (list | compile errors), detail below full width ──
 void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargin) {
     if (!plugin->m_RuleManager) {
         ImGui::Text("RuleManager not initialized. Enable the plugin first.");
@@ -188,23 +121,16 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
 
     auto& rules = plugin->m_RuleManager->GetRules();
 
-    float totalW = ImGui::GetContentRegionAvail().x - rightMargin;
-    float listLeftW = totalW * 0.5f;   // 50% rule list
-    float listRightW = totalW * 0.5f;  // 50% compile output
-    float listH = 160.0f;              // Fixed height for the split row
+    const float totalW = ImGui::GetContentRegionAvail().x - rightMargin;
+    const float listLeftW  = totalW * 0.5f;
+    const float listRightW = totalW * 0.5f;
+    const float listH      = 320.0f;
 
-    // ═══════════════════════════════════════════════════════
-    // TOP ROW — Rule list (50%) | Compile output (50%)
-    // ═══════════════════════════════════════════════════════
-    ImGui::Text("Rules");
-    ImGui::Separator();
-
-    // Left: Rule list
     ImGui::BeginChild("RuleList", ImVec2(listLeftW, listH), true);
-    for (size_t i = 0; i < rules.size(); i++) {
+    for (size_t i = 0; i < rules.size(); ++i) {
         auto& rule = rules[i];
-        bool selected = (i == (size_t)plugin->m_SelectedRuleIndex);
-        ImGui::PushID((int)i);
+        const bool selected = (static_cast<int>(i) == plugin->m_SelectedRuleIndex);
+        ImGui::PushID(static_cast<int>(i));
 
         if (ImGui::Checkbox("", &rule.Enabled)) {
             if (plugin->m_RuleStore) plugin->m_RuleStore->SaveRule(rule);
@@ -213,8 +139,9 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
 
         std::string displayName = rule.Name;
         if (!rule.CompileError.empty()) displayName += " !";
-        if (ImGui::Selectable(displayName.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap)) {
-            plugin->m_SelectedRuleIndex = (int)i;
+        if (ImGui::Selectable(displayName.c_str(), selected,
+                ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap)) {
+            plugin->m_SelectedRuleIndex = static_cast<int>(i);
         }
         if (!rule.CompileError.empty()) {
             ImGui::SameLine();
@@ -227,31 +154,40 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
     }
     ImGui::EndChild();
 
-    // Right: Compile output panel (copyable via InputTextMultiline)
     ImGui::SameLine();
-    ImGui::Dummy(ImVec2(4.0f, 0.0f)); // tiny gap
+    ImGui::Dummy(ImVec2(4.0f, 0.0f));
     ImGui::SameLine();
-    ImGui::BeginChild("CompileErrorPanel", ImVec2(listRightW, listH), true, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("CompileOutputPanel", ImVec2(listRightW, listH), true,
+        ImGuiWindowFlags_HorizontalScrollbar);
     ImGui::Text("Compile Output");
     ImGui::Separator();
     ImGui::Spacing();
 
-    if (plugin->m_SelectedRuleIndex >= 0 && plugin->m_SelectedRuleIndex < (int)rules.size()) {
+    if (plugin->m_SelectedRuleIndex >= 0 && plugin->m_SelectedRuleIndex < static_cast<int>(rules.size())) {
         const auto& curRule = rules[plugin->m_SelectedRuleIndex];
         ImVec4 textColor;
-        char compileBuf[8192] = {0};
+        std::string compileText;
         if (curRule.CompileError.empty()) {
-            strcpy(compileBuf, "Compilation OK — no errors.");
+            compileText = "Compilation OK — no errors.";
             textColor = ImVec4(0.3f, 1.0f, 0.3f, 1.0f);
         } else {
-            strncpy(compileBuf, curRule.CompileError.c_str(), sizeof(compileBuf) - 1);
+            compileText = curRule.CompileError;
             textColor = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
         }
+        const float footerH = ImGui::GetFrameHeightWithSpacing();
+        ImVec2 editSize = ImGui::GetContentRegionAvail();
+        editSize.y = std::max(48.0f, editSize.y - footerH);
+
         ImGui::PushStyleColor(ImGuiCol_Text, textColor);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 4.0f));
-        ImGui::InputTextMultiline("##CompileOutput", compileBuf, sizeof(compileBuf), ImVec2(-1, -1));
+        ImGui::InputTextMultiline("##CompileOutput", &compileText, editSize,
+            ImGuiInputTextFlags_ReadOnly);
         ImGui::PopStyleVar();
         ImGui::PopStyleColor();
+
+        if (ImGui::SmallButton("Copy")) ImGui::SetClipboardText(compileText.c_str());
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1), "read-only");
     } else {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No rule selected.");
     }
@@ -259,64 +195,97 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
 
     ImGui::Spacing();
 
-    // ═══════════════════════════════════════════════════════
-    // TOOLBAR — full width
-    // ═══════════════════════════════════════════════════════
+    // Toolbar
     const ImVec2 toolbarBtnSize(80.0f, 0.0f);
     if (ImGui::Button("New", toolbarBtnSize)) {
         std::string newName = "New Rule";
         int counter = 1;
         for (const auto& r : rules) {
-            if (r.Name.find("New Rule") == 0) counter++;
+            if (r.Name.find("New Rule") == 0) ++counter;
         }
         newName += std::to_string(counter);
         auto rule = CreateNewRule(newName);
-        rule.Order = (int)rules.size();
+        rule.Order = static_cast<int>(rules.size());
         rules.push_back(std::move(rule));
         if (plugin->m_RuleStore) plugin->m_RuleStore->SaveRule(rules.back());
-        plugin->m_SelectedRuleIndex = (int)rules.size() - 1;
+        plugin->m_SelectedRuleIndex = static_cast<int>(rules.size()) - 1;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Delete", toolbarBtnSize) && plugin->m_SelectedRuleIndex >= 0 && plugin->m_SelectedRuleIndex < (int)rules.size()) {
-        int idx = plugin->m_SelectedRuleIndex;
-        if (plugin->m_RuleStore) plugin->m_RuleStore->DeleteRule(rules[idx].Name);
-        rules.erase(rules.begin() + idx);
-        if (rules.empty()) {
-            plugin->m_SelectedRuleIndex = -1;
-        } else {
-            plugin->m_SelectedRuleIndex = std::min(idx, (int)rules.size() - 1);
-        }
+    static bool confirmDeleteOpen = false;
+    static std::string pendingDeleteName;
+    if (ImGui::Button("Delete", toolbarBtnSize)
+        && plugin->m_SelectedRuleIndex >= 0
+        && plugin->m_SelectedRuleIndex < static_cast<int>(rules.size())) {
+        pendingDeleteName = rules[plugin->m_SelectedRuleIndex].Name;
+        confirmDeleteOpen = true;
+        ImGui::OpenPopup("Delete Rule?");
     }
     ImGui::SameLine();
     if (ImGui::Button("Up", toolbarBtnSize) && plugin->m_SelectedRuleIndex > 0) {
-        std::swap(rules[plugin->m_SelectedRuleIndex], rules[plugin->m_SelectedRuleIndex - 1]);
-        std::swap(rules[plugin->m_SelectedRuleIndex].Order, rules[plugin->m_SelectedRuleIndex - 1].Order);
+        const int i = plugin->m_SelectedRuleIndex;
+        std::swap(rules[i], rules[i - 1]);
+        std::swap(rules[i].Order, rules[i - 1].Order);
         plugin->m_SelectedRuleIndex--;
-        if (plugin->m_RuleStore) { for (auto& r : rules) plugin->m_RuleStore->SaveRule(r); }
+        if (plugin->m_RuleStore) {
+            plugin->m_RuleStore->SaveRule(rules[i]);
+            plugin->m_RuleStore->SaveRule(rules[i - 1]);
+        }
+        plugin->m_RuleManager->SortByOrder();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Down", toolbarBtnSize) && plugin->m_SelectedRuleIndex >= 0 && plugin->m_SelectedRuleIndex < (int)rules.size() - 1) {
-        std::swap(rules[plugin->m_SelectedRuleIndex], rules[plugin->m_SelectedRuleIndex + 1]);
-        std::swap(rules[plugin->m_SelectedRuleIndex].Order, rules[plugin->m_SelectedRuleIndex + 1].Order);
+    if (ImGui::Button("Down", toolbarBtnSize)
+        && plugin->m_SelectedRuleIndex >= 0
+        && plugin->m_SelectedRuleIndex < static_cast<int>(rules.size()) - 1) {
+        const int i = plugin->m_SelectedRuleIndex;
+        std::swap(rules[i], rules[i + 1]);
+        std::swap(rules[i].Order, rules[i + 1].Order);
         plugin->m_SelectedRuleIndex++;
-        if (plugin->m_RuleStore) { for (auto& r : rules) plugin->m_RuleStore->SaveRule(r); }
+        if (plugin->m_RuleStore) {
+            plugin->m_RuleStore->SaveRule(rules[i]);
+            plugin->m_RuleStore->SaveRule(rules[i + 1]);
+        }
+        plugin->m_RuleManager->SortByOrder();
     }
 
     ImGui::SameLine();
-    if (plugin->m_SelectedRuleIndex >= 0 && plugin->m_SelectedRuleIndex < (int)rules.size()) {
+    if (plugin->m_SelectedRuleIndex >= 0 && plugin->m_SelectedRuleIndex < static_cast<int>(rules.size())) {
         const auto& sr = rules[plugin->m_SelectedRuleIndex];
-        ImGui::TextColored(ImVec4(0.6f,0.6f,0.6f,1), "%s | %s | %s",
-            sr.Enabled?"Enabled":"Disabled", sr.EverFired?"Fired":"Not Fired",
-            sr.LastEvalResult?"Eval=TRUE":"Eval=FALSE");
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1), "%s | %s | %s",
+            sr.Enabled ? "Enabled" : "Disabled",
+            sr.EverFired ? "Fired" : "Not Fired",
+            sr.LastEvalResult ? "Eval=TRUE" : "Eval=FALSE");
     }
 
     ImGui::Separator();
     ImGui::Spacing();
 
-    // ═══════════════════════════════════════════════════════
-    // RULE DETAIL — full width below
-    // ═══════════════════════════════════════════════════════
-    if (plugin->m_SelectedRuleIndex < 0 || plugin->m_SelectedRuleIndex >= (int)rules.size()) {
+    if (confirmDeleteOpen) {
+        if (ImGui::BeginPopupModal("Delete Rule?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text("Delete rule \"%s\"?", pendingDeleteName.c_str());
+            ImGui::TextColored(ImVec4(0.75f, 0.75f, 0.75f, 1), "This cannot be undone.");
+            ImGui::Spacing();
+            if (ImGui::Button("Cancel")) {
+                confirmDeleteOpen = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Delete")) {
+                int idx = plugin->m_SelectedRuleIndex;
+                if (idx >= 0 && idx < static_cast<int>(rules.size()) && rules[idx].Name == pendingDeleteName) {
+                    if (plugin->m_RuleStore) plugin->m_RuleStore->DeleteRule(rules[idx].Name);
+                    rules.erase(rules.begin() + idx);
+                    plugin->m_SelectedRuleIndex = rules.empty()
+                        ? -1
+                        : std::min(idx, static_cast<int>(rules.size()) - 1);
+                }
+                confirmDeleteOpen = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    if (plugin->m_SelectedRuleIndex < 0 || plugin->m_SelectedRuleIndex >= static_cast<int>(rules.size())) {
         ImGui::Text("No rule selected. Select a rule above or create a new one.");
         return;
     }
@@ -324,19 +293,35 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
     auto& rule = rules[plugin->m_SelectedRuleIndex];
     ImGui::PushID(plugin->m_SelectedRuleIndex);
 
-    float rowW = ImGui::GetContentRegionAvail().x - rightMargin;
+    const float rowW = ImGui::GetContentRegionAvail().x - rightMargin;
 
-    // Name + Key row
-    char nameBuf[256];
-    strncpy(nameBuf, rule.Name.c_str(), sizeof(nameBuf) - 1);
-    nameBuf[sizeof(nameBuf) - 1] = '\0';
-    float keyComboW = rowW * 0.4f;
-    float nameW = rowW - 40.0f - 30.0f - keyComboW - 20.0f;
+    auto isValidRuleName = [](const std::string& s) -> bool {
+        if (s.empty()) return false;
+        const std::string bad = "<>:\"/\\\\|?*";
+        if (s.find_first_of(bad) != std::string::npos) return false;
+        if (s.back() == '.' || s.back() == ' ') return false;
+        return true;
+    };
+
+    static std::string lastRenameError;
+
+    // Name + Key row.
+    // The name buffer is held locally and only synced into rule.Name on commit
+    // (IsItemDeactivatedAfterEdit) — so we don't reallocate on every keystroke.
+    static int  s_LastEditedIdx = -1;
+    static std::string s_NameDraft;
+    if (s_LastEditedIdx != plugin->m_SelectedRuleIndex || !ImGui::IsAnyItemActive()) {
+        s_NameDraft = rule.Name;
+        s_LastEditedIdx = plugin->m_SelectedRuleIndex;
+    }
+
+    const float keyComboW = rowW * 0.4f;
+    const float nameW     = rowW - 40.0f - 30.0f - keyComboW - 20.0f;
 
     ImGui::Text("Name:");
     ImGui::SameLine();
     ImGui::PushItemWidth(nameW);
-    ImGui::InputText("##name", nameBuf, sizeof(nameBuf));
+    InputString("##name", s_NameDraft);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         auto trimAscii = [](std::string s) {
             size_t a = 0;
@@ -346,21 +331,29 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
             return s.substr(a, b - a);
         };
 
-        std::string newName = trimAscii(std::string(nameBuf));
+        std::string newName = trimAscii(s_NameDraft);
         const std::string oldName = rule.Name;
         if (!newName.empty() && newName != oldName) {
-            bool renamed = false;
-            if (plugin->m_RuleStore) {
-                renamed = plugin->m_RuleStore->RenameRule(oldName, newName);
-            }
-            if (renamed) {
-                rule.Name = newName;
-                // Ensure JSON contents reflect the new name too.
-                if (plugin->m_RuleStore) plugin->m_RuleStore->SaveRule(rule);
+            if (!isValidRuleName(newName)) {
+                lastRenameError = "Invalid rule name (file name unsafe). Avoid <>:\"/\\|?* and trailing dot/space.";
+            } else {
+                bool renamed = false;
+                if (plugin->m_RuleStore) renamed = plugin->m_RuleStore->RenameRule(oldName, newName);
+                if (renamed) {
+                    lastRenameError.clear();
+                    rule.Name = newName;
+                    if (plugin->m_RuleStore) plugin->m_RuleStore->SaveRule(rule);
+                } else {
+                    lastRenameError = "Rename failed (name already exists or file is locked).";
+                }
             }
         }
     }
     ImGui::PopItemWidth();
+    if (!lastRenameError.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", lastRenameError.c_str());
+    }
+
     ImGui::SameLine();
     ImGui::Text("Key:");
     ImGui::SameLine();
@@ -380,13 +373,15 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
         VK_F1,VK_F2,VK_F3,VK_F4,VK_F5,VK_F6,VK_F7,VK_F8,VK_F9,VK_F10,VK_F11,VK_F12,
         VK_LBUTTON,VK_RBUTTON,VK_MBUTTON,VK_XBUTTON1,VK_XBUTTON2
     };
-    static const int keyCount = sizeof(keyItems)/sizeof(keyItems[0]);
+    static const int keyCount = sizeof(keyItems) / sizeof(keyItems[0]);
     int selectedKeyIdx = 0;
-    for (int k = 0; k < keyCount; k++) { if (keyValues[k] == rule.Key) { selectedKeyIdx = k; break; } }
+    for (int k = 0; k < keyCount; ++k) {
+        if (keyValues[k] == rule.Key) { selectedKeyIdx = k; break; }
+    }
 
     if (ImGui::BeginCombo("##keyCombo", keyItems[selectedKeyIdx], ImGuiComboFlags_HeightLarge)) {
-        for (int k = 0; k < keyCount; k++) {
-            bool is_sel = (k == selectedKeyIdx);
+        for (int k = 0; k < keyCount; ++k) {
+            const bool is_sel = (k == selectedKeyIdx);
             if (ImGui::Selectable(keyItems[k], is_sel)) { rule.Key = keyValues[k]; selectedKeyIdx = k; }
             if (is_sel) ImGui::SetItemDefaultFocus();
         }
@@ -396,7 +391,7 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
 
     // Anim Wait + Cooldown
     float animWaitSec = rule.WaitAfterPressMs / 1000.0f;
-    float sliderW = rowW * 0.4f;
+    const float sliderW = rowW * 0.4f;
     ImGui::Text("Anim Wait:");
     ImGui::SameLine();
     ImGui::PushItemWidth(sliderW);
@@ -410,7 +405,6 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
     ImGui::SliderFloat("##cooldown", &rule.CooldownSec, 0.1f, 30.0f, "%.2f s");
     ImGui::PopItemWidth();
 
-    // Save / Compile
     ImGui::Spacing();
     if (ImGui::Button("Compile & Save", ImVec2(220, 0))) {
         if (plugin->m_RuleStore) plugin->m_RuleStore->SaveRule(rule);
@@ -418,27 +412,23 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
     }
     if (!rule.CompileError.empty()) {
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "Error");
+        ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Error");
     } else if (rule.CompiledExpr && rule.CompiledExpr->IsValid()) {
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.3f,1,0.3f,1), "OK");
+        ImGui::TextColored(ImVec4(0.3f, 1, 0.3f, 1), "OK");
     }
 
     ImGui::Separator();
     ImGui::Spacing();
 
-    // Script editor fills remaining height
+    // Script editor — InputTextMultiline binds to rule.ScriptBody directly via
+    // ImGui's std::string adapter. No 16 KB stack copy on every frame.
     ImGui::Text("Script:");
     ImVec2 editorSize = ImGui::GetContentRegionAvail();
     editorSize.y -= 8.0f;
     if (editorSize.y < 80.0f) editorSize.y = 80.0f;
     ImGui::BeginChild("ScriptEditor", editorSize, true);
-    char scriptBuf[16384];
-    strncpy(scriptBuf, rule.ScriptBody.c_str(), sizeof(scriptBuf) - 1);
-    scriptBuf[sizeof(scriptBuf) - 1] = '\0';
-    if (ImGui::InputTextMultiline("##script", scriptBuf, sizeof(scriptBuf), ImVec2(-1, -1))) {
-        rule.ScriptBody = scriptBuf;
-    }
+    InputStringMultiline("##script", rule.ScriptBody, ImVec2(-1, -1));
     ImGui::EndChild();
 
     ImGui::PopID();

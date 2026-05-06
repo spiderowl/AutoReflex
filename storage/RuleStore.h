@@ -33,13 +33,11 @@ public:
     void LoadAll(std::vector<Rules::Rule>& outRules) const;
 
 private:
-    mutable std::string m_RulesDir;
+    std::string m_RulesDir;
 
     // JSON helpers
     static std::string ruleFilePath(const std::string& rulesDir, const std::string& name);
     static std::string escapeJson(const std::string& s);
-    static std::string unescapeJson(const std::string& s);
-    static std::string trim(const std::string& s);
 };
 
 } // namespace Storage

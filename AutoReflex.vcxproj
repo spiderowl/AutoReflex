@@ -44,20 +44,59 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>MaxSpeed</Optimization>
-      <FunctionLevelLinking>true</FunctionLevelLinking>
-      <IntrinsicFunctions>true</IntrinsicFunctions>
-      <SDLCheck>true</SDLCheck>
+
+      <!-- Core optimization -->
+      <Optimization>MaxSpeed</Optimization>                         <!-- /O2  -->
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>                    <!-- /Ot  -->
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion><!-- /Ob3 -->
+      <IntrinsicFunctions>true</IntrinsicFunctions>                 <!-- /Oi  -->
+      <OmitFramePointers>true</OmitFramePointers>                   <!-- /Oy  -->
+      <FunctionLevelLinking>true</FunctionLevelLinking>             <!-- /Gy  -->
+      <StringPooling>true</StringPooling>                           <!-- /GF  -->
+      <FloatingPointModel>Fast</FloatingPointModel>                 <!-- /fp:fast -->
+
+      <!-- Universal compatibility: stay on the x86-64 architectural baseline
+           (SSE2 — required by x64 itself, present on every 64-bit Windows CPU
+           ever shipped). Avoid /arch:AVX, /arch:AVX2, /arch:AVX512 — they pin
+           the DLL to specific CPU generations and "illegal instruction" the
+           moment a user with an older or trimmed-down chip loads it. -->
+      <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+
+      <!-- Whole-program / dead-code stripping. Pairs with /LTCG at link time. -->
+      <WholeProgramOptimization>true</WholeProgramOptimization>     <!-- /GL  -->
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData> <!-- /Zc:inline + COMDAT folding hints -->
+
+      <!-- Stability-preserving guards we keep ON (perf cost is negligible
+           and a DLL injected into a game should not throw safety to the
+           wind): /GS (buffer security check), /EHsc (exceptions — EXPRTK
+           uses them), RTTI (EXPRTK uses dynamic_cast). -->
+
+      <SDLCheck>false</SDLCheck>
       <PreprocessorDefinitions>PLUGIN_EXPORTS;NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir)imgui\misc\cpp;$(ProjectDir);$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+
+      <!-- /bigobj: required for some EXPRTK TUs.
+           /Zc:inline: drop unreferenced inline COMDATs.
+           /Zc:throwingNew: assume operator new throws (lets the compiler
+                            elide null checks after new).
+           /cgthreads8: parallelize codegen across 8 threads. -->
+      <AdditionalOptions>/bigobj /Zc:inline /Zc:throwingNew /cgthreads8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
+
+      <!-- Match /GL with /LTCG; fold identical COMDATs and drop unreferenced
+           code/data in the final image. -->
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+
+      <!-- Keep symbols for crash dumps. /DEBUG produces a PDB next to the
+           DLL; runtime cost is zero. -->
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
@@ -70,7 +109,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir);$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir)imgui\misc\cpp;$(ProjectDir);$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -82,35 +121,24 @@
   <ItemGroup>
     <ClCompile Include="AutoReflex.cpp" />
     <ClCompile Include="core\ShouldExecute.cpp" />
-    <ClCompile Include="game\ConditionState.cpp" />
-    <ClCompile Include="game\KeySender.cpp" />
-    <ClCompile Include="game\NearbyMonsterCache.cpp" />
-    <ClCompile Include="game\MonsterQuery.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
+    <ClCompile Include="imgui\misc\cpp\imgui_stdlib.cpp" />
     <ClCompile Include="rules\RuleManager.cpp" />
     <ClCompile Include="scripting\ScriptEngine.cpp" />
     <ClCompile Include="storage\RuleStore.cpp" />
     <ClCompile Include="storage\SettingsStore.cpp" />
-    <ClCompile Include="ui\EntityDetail.cpp" />
-    <ClCompile Include="ui\EntityList.cpp" />
-    <ClCompile Include="ui\Overlay.cpp" />
-    <ClCompile Include="ui\RuleEditor.cpp" />
-    <ClCompile Include="ui\RuleList.cpp" />
     <ClCompile Include="ui\SettingsPanel.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AutoReflex.h" />
-    <ClInclude Include="core\AgentDebugLog.h" />
+    <ClInclude Include="core\EvalThrottle.h" />
     <ClInclude Include="core\ShouldExecute.h" />
-    <ClInclude Include="game\ConditionState.h" />
     <ClInclude Include="game\KeySender.h" />
     <ClInclude Include="game\MonsterHelpers.h" />
-    <ClInclude Include="game\MonsterInfo.h" />
-    <ClInclude Include="game\NearbyMonsterCache.h" />
-    <ClInclude Include="game\MonsterQuery.h" />
+    <ClInclude Include="imgui\misc\cpp\imgui_stdlib.h" />
     <ClInclude Include="rules\Rule.h" />
     <ClInclude Include="rules\RuleManager.h" />
     <ClInclude Include="scripting\exprtk.hpp" />
@@ -121,11 +149,6 @@
     <ClInclude Include="sdk\PluginHelpers.h" />
     <ClInclude Include="storage\RuleStore.h" />
     <ClInclude Include="storage\SettingsStore.h" />
-    <ClInclude Include="ui\EntityDetail.h" />
-    <ClInclude Include="ui\EntityList.h" />
-    <ClInclude Include="ui\Overlay.h" />
-    <ClInclude Include="ui\RuleEditor.h" />
-    <ClInclude Include="ui\RuleList.h" />
     <ClInclude Include="ui\SettingsPanel.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

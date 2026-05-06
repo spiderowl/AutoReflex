@@ -1,6 +1,5 @@
-// AutoReflex - KeySender (Phase 3)
-// Simulates key presses using SendInput (Win32 API)
-// T21: PressKey(WORD vk) using SendInput keydown + keyup pair
+// AutoReflex - KeySender
+// Synthetic key presses via SendInput (global; the host has no role here).
 
 #pragma once
 
@@ -9,25 +8,18 @@
 namespace AutoReflex {
 namespace Game {
 
-// T21: Simulate a single key press (keydown + keyup) using SendInput.
-// vk is the virtual-key code (e.g. 'Q', VK_SPACE, 0x01 for LButton).
+// Press and release a single virtual key (e.g. 'Q', VK_SPACE, VK_LBUTTON).
 inline void PressKey(WORD vk)
 {
-    INPUT zeroInitializedInput = {0};
-    zeroInitializedInput.type = INPUT_KEYBOARD;
-    zeroInitializedInput.ki.wVk = vk;
+    INPUT input = {0};
+    input.type     = INPUT_KEYBOARD;
+    input.ki.wVk   = vk;
 
-    // Key down
-    SendInput(1, &zeroInitializedInput, sizeof(INPUT));
+    SendInput(1, &input, sizeof(INPUT));
 
-    // Key up
-    zeroInitializedInput.ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(1, &zeroInitializedInput, sizeof(INPUT));
+    input.ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(1, &input, sizeof(INPUT));
 }
-
-// Legacy signature kept for compatibility with existing callers.
-// Uses SendInput internally (ignores ctx since SendInput is global).
-void ExecuteKeyPress(int virtualKeyCode, float holdDuration, void* ctx);
 
 } // namespace Game
 } // namespace AutoReflex

@@ -1,78 +1,75 @@
 // AutoReflex - ScriptEngine.h
-// EXPRTK-based expression evaluation engine (header-only, no external dependency)
-// Replaces AngelScript with lightweight mathematical expression evaluation
+// EXPRTK-based expression evaluation engine (header-only, no external dependency).
 //
-// Each rule's condition is a boolean expression over entity fields:
-//   e.IsValid and e.CurrentHP > 100 and !e.IsSleeping
+// Each rule's condition is a boolean expression over a single entity, e.g.:
+//   e_IsValid and e_CurrentHP > 100 and !e_IsSleeping
 //
-// Variable mapping (entity fields exposed as 'e.<field>'):
-//   e.Id, e.IsValid, e.Rarity, e.GridPositionX, e.GridPositionY
-//   e.WorldX, e.WorldY, e.WorldZ
-//   e.CurrentHP, e.MaxHP, e.CurrentES, e.MaxES, e.IsSleeping
+// Per-entity variables exposed to the expression:
+//   e_Id, e_IsValid, e_Rarity, e_EntityState
+//   e_GridPositionX, e_GridPositionY
+//   e_WorldX, e_WorldY, e_WorldZ
+//   e_CurrentHP, e_MaxHP, e_CurrentES, e_MaxES, e_IsSleeping
+//   e_CursorDistPx, e_Reaction
+//
+// Host-bridge calls (WorldToScreen, ReadBuffsComponent) are gated on per-expression
+// "needs" flags computed at Compile time so that expressions that don't reference,
+// e.g., e_CursorDistPx never pay for it.
 
 #pragma once
 
 #include <string>
 #include <memory>
+#include <vector>
 #include "sdk/PluginGameData.h"
 
-// EXPRTK is header-only - include the single header
 #include "exprtk.hpp"
 
 struct PluginContext;
-
-// Forward declarations replaced by direct includes above
-
-// ============================================================================
-// CompiledExpression - holds a pre-compiled EXPRTK expression for a single rule
-// ============================================================================
 
 class CompiledExpression {
 public:
     CompiledExpression();
     ~CompiledExpression();
 
-    // Compile an expression string; returns true on success
+    // Compile an expression string; returns true on success.
     bool Compile(const std::string& exprString, std::string& errorMsg);
 
-    // Evaluate the expression against a RadarEntity; returns the boolean result
-    // cursorX/cursorY are grid-coordinate position of the mouse cursor
+    // Evaluate against a single RadarEntity. Reads only the host-bridge data
+    // referenced by the compiled expression (see needs* flags below).
     bool Evaluate(PluginContext* ctx,
-                  const PluginSDK::RadarEntity& entity,
-                  double cursorX, double cursorY) const;
+                  const PluginSDK::RadarEntity& entity) const;
 
-    // Check if this expression is valid
     bool IsValid() const { return expression_ != nullptr; }
 
-    // Get the source expression string
-    const std::string& GetExpressionString() const { return exprString_; }
-
-    // Internal helpers used by EXPRTK thunks (registered functions).
-    bool HasBuffIdx(int idx) const;
+    // Internal helpers used by EXPRTK thunks.
+    bool   HasBuffIdx(int idx) const;
     double HasBuffValueIdx(int idx) const;
-    bool PathContainsIdx(int idx) const;
+    bool   PathContainsIdx(int idx) const;
 
 private:
+    // Detect which expensive lookups are referenced by the compiled string.
+    void ComputeNeedsFlags();
+
     std::string exprString_;
     std::string compiledString_;
 
-    // Preprocessed needles referenced by hasBuffIdx()/pathContainsIdx()
+    // Pre-interned needles passed by index to EXPRTK functions.
+    // pathNeedlesLower_ is pre-lowercased to skip per-frame work in PathContainsIdx.
     std::vector<std::string> buffNeedles_;
     std::vector<std::string> pathNeedles_;
+    std::vector<std::string> pathNeedlesLower_;
 
-    // EXPRTK uses smart pointers internally for expression nodes
     std::unique_ptr<exprtk::expression<double>> expression_;
     std::unique_ptr<exprtk::symbol_table<double>> symbolTable_;
     std::unique_ptr<exprtk::parser<double>> parser_;
 
-    // Entity field variables (bound by reference during evaluation)
+    // --- Per-evaluation bound variables ---
     mutable double e_Id;
     mutable double e_IsValid;
     mutable double e_Rarity;
-    mutable double e_Zone;
+    mutable double e_EntityState;
     mutable double e_GridPositionX;
     mutable double e_GridPositionY;
-    mutable double e_GridPositionZ;
     mutable double e_WorldX;
     mutable double e_WorldY;
     mutable double e_WorldZ;
@@ -83,48 +80,37 @@ private:
     mutable double e_IsSleeping;
     mutable double e_CursorDistPx;
     mutable double e_Reaction;
-    mutable double e_IsTargetable;
 
-    // Context variables (set per-evaluation, e.g. cursor position)
-    mutable double curX;
-    mutable double curY;
-
-    // Evaluation context for custom functions (mutable to allow const Evaluate)
+    // --- Per-evaluation context for thunks ---
     mutable PluginContext* curCtx_ = nullptr;
     mutable const PluginSDK::RadarEntity* curEnt_ = nullptr;
-    mutable std::vector<int8_t> buffResultCache_; // -1 unknown, 0 false, 1 true
-    mutable std::vector<int16_t> buffValueCache_; // -32768 unknown, else charges/value (or 0 if absent)
-    mutable std::vector<int8_t> pathResultCache_; // -1 unknown, 0 false, 1 true
 
-    // (reserved for future snapshot-wide helpers)
+    // Per-evaluation result caches for repeated needle lookups in one expr.
+    mutable std::vector<int8_t>  buffResultCache_;   // -1 unknown, 0 false, 1 true
+    mutable std::vector<int16_t> buffValueCache_;    // -32768 unknown, else value
+    mutable std::vector<int8_t>  pathResultCache_;   // -1 unknown, 0 false, 1 true
 
+    // Per-evaluation lazily-built lowered path of the current entity.
+    mutable std::string pathLowerScratch_;
+    mutable bool        pathLowerReady_ = false;
+
+    // --- "Needs" flags: avoid host-bridge calls when the expression doesn't
+    //     actually reference these fields/functions. Set during Compile. ---
+    bool needsCursorPx_  = false;
+    bool needsBuffs_     = false;   // hasBuffIdx / hasBuffValueIdx in expr
+    bool needsPath_      = false;   // pathContainsIdx in expr
 };
-
-// ============================================================================
-// ScriptEngine - global singleton for EXPRTK initialization
-// ============================================================================
 
 class ScriptEngine {
 public:
     ScriptEngine();
     ~ScriptEngine();
 
-    // Initialize ( lightweight - EXPRTK is header-only so this is mostly no-op )
     bool Initialize();
-
-    // Check if the engine is ready
     bool IsInitialized() const { return initialized_; }
 
-    // Get last error message
-    const std::string& GetLastError() const { return lastError; }
-
-    // Check if an expression string is valid syntax (quick compile test)
     static bool ValidateExpression(const std::string& expr, std::string& errorMsg);
 
 private:
     bool initialized_ = false;
-    std::string lastError;
 };
-
-// Global singleton access
-ScriptEngine& GetScriptEngine();

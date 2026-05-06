@@ -1,38 +1,40 @@
 // AutoReflex - RuleManager.cpp
-// Compiles and evaluates rules using EXPRTK expressions
+// Compiles and evaluates rules using EXPRTK expressions.
+//
+// Hot path: iterate m_Rules (already sorted by Order), and for each enabled
+// rule with a valid compiled expression and an expired cooldown, walk only
+// monster entities in the snapshot until one passes. Per-monster work is
+// the EXPRTK Evaluate() call, which gates host-bridge reads on flags
+// computed at compile time (see ScriptEngine.cpp).
 
 #include "RuleManager.h"
 #include "Rule.h"
-#include "../core/AgentDebugLog.h"
-#include "../game/ConditionState.h"
 #include "../scripting/ScriptEngine.h"
 #include "../storage/RuleStore.h"
 #include "../sdk/PluginContext.h"
+#include "../sdk/PluginGameData.h"
 
 #include <chrono>
-#include <sstream>
 #include <algorithm>
-#include <numeric>
 
 namespace AutoReflex { namespace Rules {
 
-RuleManager::RuleManager()
-{
-}
-
-RuleManager::~RuleManager()
-{
-}
+RuleManager::RuleManager() = default;
+RuleManager::~RuleManager() = default;
 
 void RuleManager::LoadRules(Storage::RuleStore& store)
 {
-    // Load all rules from disk into m_Rules
     store.LoadAll(m_Rules);
-
-    // Compile each loaded rule
     for (auto& rule : m_Rules) {
         CompileRule(rule);
     }
+    SortByOrder();
+}
+
+void RuleManager::SortByOrder()
+{
+    std::stable_sort(m_Rules.begin(), m_Rules.end(),
+        [](const Rule& a, const Rule& b) { return a.Order < b.Order; });
 }
 
 void RuleManager::CompileRule(Rule& rule)
@@ -40,106 +42,54 @@ void RuleManager::CompileRule(Rule& rule)
     rule.CompileError.clear();
     rule.CompiledExpr.reset();
 
-    // ScriptBody should be an EXPRTK boolean expression
-    std::string expr = rule.ScriptBody;
-
+    const std::string& expr = rule.ScriptBody;
     if (expr.empty()) {
         rule.CompileError = "Expression is empty";
-        // #region agent log
-        ArAgentNdjsonLog("H-BUILD", "RuleManager::CompileRule", "Expression is empty for rule: " + rule.Name, "{}");
-        // #endregion
         return;
     }
 
-    // Validate the expression first
     std::string errorMsg;
     if (!ScriptEngine::ValidateExpression(expr, errorMsg)) {
         rule.CompileError = errorMsg;
-        // #region agent log
-        ArAgentNdjsonLog("H-BUILD", "RuleManager::CompileRule.ValidateFailed",
-            std::string("rule=") + rule.Name + " err=" + errorMsg,
-            "{}");
-        // #endregion
         return;
     }
 
-    // Create and compile the expression
     rule.CompiledExpr = std::make_unique<CompiledExpression>();
     if (!rule.CompiledExpr->Compile(expr, rule.CompileError)) {
         rule.CompiledExpr.reset();
-        // #region agent log
-        ArAgentNdjsonLog("H-BUILD", "RuleManager::CompileRule.CompileFailed",
-            std::string("rule=") + rule.Name + " err=" + rule.CompileError,
-            "{}");
-        // #endregion
-        return;
     }
-
-    // #region agent log
-    {
-        std::ostringstream d;
-        d << "{\"ruleName\":\"" << ArJsonEsc(rule.Name)
-          << "\",\"exprLen\":" << expr.size() << "}";
-        ArAgentNdjsonLog("H-BUILD", "RuleManager::CompileRule.BuildOk", "Rule compiled successfully", d.str());
-    }
-    // #endregion
 }
 
 void RuleManager::EvaluateAll(
     PluginContext* ctx,
-    Game::ConditionState& conditionState,
-    std::function<void(const Rule&)> onFire)
+    const PluginSDK::PluginGameSnapshot* snapshot,
+    const std::function<void(const Rule&)>& onFire)
 {
-    if (!ctx) return;
-    auto now = std::chrono::steady_clock::now();
+    if (!ctx || !snapshot) return;
 
-    // Snapshot is consistent for this evaluation pass; fetch once per frame.
-    auto snapshot = ctx->GetSnapshot();
-    if (!snapshot) return;
+    const auto now = std::chrono::steady_clock::now();
+    const auto& entities = snapshot->Entities;
 
-    // Sort by order (lower = higher priority)
-    std::vector<size_t> indices(m_Rules.size());
-    std::iota(indices.begin(), indices.end(), 0);
-    std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
-        return m_Rules[a].Order < m_Rules[b].Order;
-    });
-
-    for (size_t idx : indices) {
-        Rule& rule = m_Rules[idx];
-
-        // Skip disabled rules
+    for (Rule& rule : m_Rules) {
         if (!rule.Enabled) continue;
-
-        // Skip if no compiled expression
         if (!rule.CompiledExpr || !rule.CompiledExpr->IsValid()) continue;
 
-        // Check cooldown
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - rule.LastFired).count();
-        if (elapsed < rule.CooldownSec * 1000.0f) continue;
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - rule.LastFired).count();
+        if (elapsedMs < static_cast<long long>(rule.CooldownSec * 1000.0f)) continue;
 
-        // Evaluate EXPRTK expression against each entity
-        bool conditionMet = false;
-
-        // Get cursor position in grid coordinates
-        auto curPos = conditionState.CursorPos();
-        double curX = static_cast<double>(curPos.x);
-        double curY = static_cast<double>(curPos.y);
-
-        // Get Entities from PluginContext snapshot
-        for (const auto& entity : snapshot->Entities) {
+        bool fired = false;
+        for (const auto& entity : entities) {
+            if (entity.entityType != PluginSDK::EntityTypes::Monster) continue;
             if (!entity.IsValid) continue;
-
-            // Evaluate the EXPRTK expression against this entity
-            if (rule.CompiledExpr->Evaluate(ctx, entity, curX, curY)) {
-                conditionMet = true;
+            if (rule.CompiledExpr->Evaluate(ctx, entity)) {
+                fired = true;
                 break;
             }
         }
 
-        rule.LastEvalResult = conditionMet;
-
-        // If condition is true, fire the rule
-        if (conditionMet && onFire) {
+        rule.LastEvalResult = fired;
+        if (fired && onFire) {
             onFire(rule);
             rule.LastFired = now;
             rule.EverFired = true;
@@ -147,4 +97,4 @@ void RuleManager::EvaluateAll(
     }
 }
 
-} } // namespace AutoReflex::Rules
+}} // namespace AutoReflex::Rules
