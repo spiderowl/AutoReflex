@@ -14,11 +14,17 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
+#if defined(_DEBUG) || defined(AUTOREFLEX_ENABLE_BUFFS_DUMP)
+#define AUTOREFLEX_BUFFS_DUMP 1
 #include <fstream>
+#else
+#define AUTOREFLEX_BUFFS_DUMP 0
+#endif
 #include <mutex>
 #include <unordered_set>
 #include <chrono>
 #include <filesystem>
+#include <cstring>
 
 using symbol_table_t = exprtk::symbol_table<double>;
 using expression_t   = exprtk::expression<double>;
@@ -44,6 +50,7 @@ CompiledExpression::CompiledExpression()
     symbolTable_->add_variable("e_MaxES",         e_MaxES);
     symbolTable_->add_variable("e_IsSleeping",    e_IsSleeping);
     symbolTable_->add_variable("e_CursorDistPx",  e_CursorDistPx);
+    symbolTable_->add_variable("e_CursorDistSq",  e_CursorDistSq);
     symbolTable_->add_variable("e_Reaction",      e_Reaction);
 
     symbolTable_->add_constants();
@@ -197,30 +204,41 @@ bool ParseParenArgs(const std::string& s, size_t& i, std::vector<std::string>& o
     return true;
 }
 
-bool TranslateMonsterCountChain(const std::string& s,
-                                size_t& i,
-                                std::string& outExpr,
-                                std::vector<std::string>& buffNeedles,
-                                std::vector<std::string>& pathNeedles,
-                                std::string& errorMsg)
+bool TranslateMonsterCountChainImpl(const char* root,
+                                    int defaultReaction,
+                                    const std::string& s,
+                                    size_t& i,
+                                    std::string& outExpr,
+                                    std::vector<std::string>& buffNeedles,
+                                    std::vector<std::string>& pathNeedles,
+                                    std::string& errorMsg)
 {
-    static constexpr char   kRoot[]  = "monsterCount";
-    static constexpr size_t kRootLen = sizeof(kRoot) - 1;
+    const size_t kRootLen = std::strlen(root);
     // When `.nearCursor` is omitted, apply this default. Skills are cursor-aimed,
     // so the cursor-pixel radius is the only implicit spatial filter.
     static constexpr int kDefaultNearCursorPx = 200;
 
-    if (s.compare(i, kRootLen, kRoot) != 0) return false;
+    if (s.compare(i, kRootLen, root) != 0) return false;
     size_t p = i + kRootLen;
 
-    std::vector<std::string> conds;
-    conds.reserve(10);
-    conds.push_back("(e_Reaction==0)");
-    conds.push_back("(e_CurrentHP>0)");
-    conds.push_back("(e_IsSleeping==0)");
+    // Order matters for perf: core filters first, then aim (WorldToScreen),
+    // then buff reads (ReadBuffsComponent) last.
+    std::vector<std::string> coreConds;
+    std::vector<std::string> aimConds;
+    std::vector<std::string> buffConds;
+    coreConds.reserve(10);
+    aimConds.reserve(2);
+    buffConds.reserve(6);
+
+    coreConds.push_back("(e_Reaction==" + std::to_string(defaultReaction) + ")");
+    coreConds.push_back("(e_CurrentHP>0)");
+    coreConds.push_back("(e_IsSleeping==0)");
     int hiddenMonsterIdx = -1;
 
     bool sawNearCursor = false;
+    // Expression string for N^2 used by buff-gated reads.
+    // Default is the implicit nearCursor when the method is omitted.
+    std::string aimLimitSqExpr = "((200)*(200))";
 
     while (p < s.size()) {
         SkipWs(s, p);
@@ -241,20 +259,22 @@ bool TranslateMonsterCountChain(const std::string& s,
 
         if (method == "nearCursor") {
             sawNearCursor = true;
-            conds.push_back("(e_CursorDistPx<=" + arg + ")");
+            aimLimitSqExpr = "((" + arg + ")*(" + arg + "))";
+            aimConds.push_back("(e_CursorDistSq<=(" + aimLimitSqExpr + "))");
         } else if (method == "hasBuff") {
             int idx = InternNeedle(buffNeedles, arg);
-            conds.push_back("hasBuffIdx(" + std::to_string(idx) + ")");
+            // Gate buff reads on aim radius even if the expression engine evaluates both sides.
+            buffConds.push_back("hasBuffIdxGate(" + std::to_string(idx) + "," + aimLimitSqExpr + ")");
         } else if (method == "notHasBuff") {
             int idx = InternNeedle(buffNeedles, arg);
-            conds.push_back("(hasBuffIdx(" + std::to_string(idx) + ")==0)");
+            buffConds.push_back("(hasBuffIdxGate(" + std::to_string(idx) + "," + aimLimitSqExpr + ")==0)");
         } else if (method == "hasName") {
             int idx = InternNeedle(pathNeedles, arg);
-            conds.push_back("pathContainsIdx(" + std::to_string(idx) + ")");
+            coreConds.push_back("pathContainsIdx(" + std::to_string(idx) + ")");
         } else if (method == "hasBuffValue") {
             if (args.size() != 2) { errorMsg = "hasBuffValue() expects 2 args: \"name\",number"; return false; }
             int idx = InternNeedle(buffNeedles, args[0]);
-            conds.push_back("(hasBuffValueIdx(" + std::to_string(idx) + ")==" + args[1] + ")");
+            buffConds.push_back("(hasBuffValueIdxGate(" + std::to_string(idx) + "," + aimLimitSqExpr + ")==" + args[1] + ")");
         } else if (method == "type") {
             auto parts = SplitByPipe(arg);
             if (parts.empty()) { errorMsg = "type() expects a rarity token"; return false; }
@@ -276,7 +296,7 @@ bool TranslateMonsterCountChain(const std::string& s,
             }
 
             if (sawAtLeast) {
-                conds.push_back("(e_Rarity>=" + std::to_string(atleastVal) + ")");
+                coreConds.push_back("(e_Rarity>=" + std::to_string(atleastVal) + ")");
             }
             if (!equalsVals.empty()) {
                 std::string expr = "(";
@@ -285,7 +305,7 @@ bool TranslateMonsterCountChain(const std::string& s,
                     expr += "(e_Rarity==" + std::to_string(equalsVals[k]) + ")";
                 }
                 expr += ")";
-                conds.push_back(expr);
+                coreConds.push_back(expr);
             }
         } else {
             errorMsg = "Unknown monsterCount method: " + method;
@@ -294,12 +314,20 @@ bool TranslateMonsterCountChain(const std::string& s,
     }
 
     if (!sawNearCursor) {
-        conds.push_back("(e_CursorDistPx<=" + std::to_string(kDefaultNearCursorPx) + ")");
+        const std::string n = std::to_string(kDefaultNearCursorPx);
+        aimLimitSqExpr = "((" + n + ")*(" + n + "))";
+        aimConds.push_back("(e_CursorDistSq<=(" + aimLimitSqExpr + "))");
     }
 
     // Dormant / unrevealed packs often carry hidden_monster on Buffs; exclude by default.
     hiddenMonsterIdx = InternNeedle(buffNeedles, "hidden_monster");
-    conds.push_back("(hasBuffIdx(" + std::to_string(hiddenMonsterIdx) + ")==0)");
+    buffConds.push_back("(hasBuffIdxGate(" + std::to_string(hiddenMonsterIdx) + "," + aimLimitSqExpr + ")==0)");
+
+    std::vector<std::string> conds;
+    conds.reserve(coreConds.size() + aimConds.size() + buffConds.size());
+    conds.insert(conds.end(), coreConds.begin(), coreConds.end());
+    conds.insert(conds.end(), aimConds.begin(), aimConds.end());
+    conds.insert(conds.end(), buffConds.begin(), buffConds.end());
 
     outExpr = "(";
     for (size_t k = 0; k < conds.size(); ++k) {
@@ -310,6 +338,26 @@ bool TranslateMonsterCountChain(const std::string& s,
 
     i = p;
     return true;
+}
+
+bool TranslateMonsterCountChain(const std::string& s,
+                                size_t& i,
+                                std::string& outExpr,
+                                std::vector<std::string>& buffNeedles,
+                                std::vector<std::string>& pathNeedles,
+                                std::string& errorMsg)
+{
+    return TranslateMonsterCountChainImpl("monsterCount", 0, s, i, outExpr, buffNeedles, pathNeedles, errorMsg);
+}
+
+bool TranslateFriendlyMonsterCountChain(const std::string& s,
+                                        size_t& i,
+                                        std::string& outExpr,
+                                        std::vector<std::string>& buffNeedles,
+                                        std::vector<std::string>& pathNeedles,
+                                        std::string& errorMsg)
+{
+    return TranslateMonsterCountChainImpl("friendlyMonsterCount", 2, s, i, outExpr, buffNeedles, pathNeedles, errorMsg);
 }
 
 bool PreprocessExpression(const std::string& in,
@@ -326,6 +374,11 @@ bool PreprocessExpression(const std::string& in,
         std::string translated;
         size_t save = i;
         if (TranslateMonsterCountChain(in, save, translated, buffNeedles, pathNeedles, errorMsg)) {
+            out += translated;
+            i = save;
+            continue;
+        }
+        if (TranslateFriendlyMonsterCountChain(in, save, translated, buffNeedles, pathNeedles, errorMsg)) {
             out += translated;
             i = save;
             continue;
@@ -396,11 +449,20 @@ double HasBuffValueIdxThunk(double idx) {
     if (!tl_expr) return 0.0;
     return tl_expr->HasBuffValueIdx(static_cast<int>(idx));
 }
+double HasBuffIdxGateThunk(double idx, double limitSq) {
+    if (!tl_expr) return 0.0;
+    return tl_expr->HasBuffIdxGate(static_cast<int>(idx), limitSq) ? 1.0 : 0.0;
+}
+double HasBuffValueIdxGateThunk(double idx, double limitSq) {
+    if (!tl_expr) return 0.0;
+    return tl_expr->HasBuffValueIdxGate(static_cast<int>(idx), limitSq);
+}
 double PathContainsIdxThunk(double idx) {
     if (!tl_expr) return 0.0;
     return tl_expr->PathContainsIdx(static_cast<int>(idx)) ? 1.0 : 0.0;
 }
 double Dummy1Thunk(double) { return 0.0; }
+double Dummy2Thunk(double, double) { return 0.0; }
 
 inline char AsciiToLower(char c) {
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
@@ -414,9 +476,11 @@ bool Contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
+#if AUTOREFLEX_BUFFS_DUMP
 std::mutex g_buffsDumpMu;
 std::string g_buffsDumpPath = "AutoReflex_BuffsDump.txt";
 bool g_buffsDumpEnabled = false;
+#endif
 
 static bool IsTrueTag(const char* tag)
 {
@@ -472,6 +536,10 @@ void AppendBuffsDebugLine(const PluginSDK::RadarEntity& ent,
                           const PluginSDK::PluginBuffsData* dataOrNull,
                           const char* tag)
 {
+#if !AUTOREFLEX_BUFFS_DUMP
+    (void)ent; (void)dataOrNull; (void)tag;
+    return;
+#else
     // User-requested debugging: dump what ReadBuffsComponent returned.
     // Intentionally append-only and can be large.
     {
@@ -526,30 +594,46 @@ void AppendBuffsDebugLine(const PluginSDK::RadarEntity& ent,
     for (size_t i = 0; i < dataOrNull->Buffs.size(); ++i) {
         f << "  [" << i << "] name=\"" << dataOrNull->Buffs[i].Name << "\"\n";
     }
+#endif
 }
 
 } // anonymous namespace
 
 void ScriptEngine::SetBuffsDumpPath(const std::string& path)
 {
+#if !AUTOREFLEX_BUFFS_DUMP
+    (void)path;
+    return;
+#else
     if (path.empty()) return;
     std::lock_guard<std::mutex> lock(g_buffsDumpMu);
     g_buffsDumpPath = path;
+#endif
 }
 
 void ScriptEngine::SetBuffsDumpEnabled(bool enabled)
 {
+#if !AUTOREFLEX_BUFFS_DUMP
+    (void)enabled;
+    return;
+#else
     std::lock_guard<std::mutex> lock(g_buffsDumpMu);
     g_buffsDumpEnabled = enabled;
+#endif
 }
 
 
 void CompiledExpression::ComputeNeedsFlags()
 {
     needsCursorPx_   = compiledString_.find("e_CursorDistPx")  != std::string::npos;
-    needsBuffs_      = (compiledString_.find("hasBuffIdx(")     != std::string::npos)
-                    || (compiledString_.find("hasBuffValueIdx(")!= std::string::npos);
+    needsCursorSq_   = compiledString_.find("e_CursorDistSq")  != std::string::npos;
+    needsBuffs_      = (compiledString_.find("hasBuffIdx(")          != std::string::npos)
+                    || (compiledString_.find("hasBuffValueIdx(")     != std::string::npos)
+                    || (compiledString_.find("hasBuffIdxGate(")      != std::string::npos)
+                    || (compiledString_.find("hasBuffValueIdxGate(") != std::string::npos);
     needsPath_       = compiledString_.find("pathContainsIdx(") != std::string::npos;
+    needsCursorForBuffGate_ = (compiledString_.find("hasBuffIdxGate(") != std::string::npos)
+                           || (compiledString_.find("hasBuffValueIdxGate(") != std::string::npos);
 }
 
 bool CompiledExpression::Compile(const std::string& exprString, std::string& errorMsg)
@@ -573,6 +657,8 @@ bool CompiledExpression::Compile(const std::string& exprString, std::string& err
 
     symbolTable_->add_function("hasBuffIdx",      &HasBuffIdxThunk);
     symbolTable_->add_function("hasBuffValueIdx", &HasBuffValueIdxThunk);
+    symbolTable_->add_function("hasBuffIdxGate",      &HasBuffIdxGateThunk);
+    symbolTable_->add_function("hasBuffValueIdxGate", &HasBuffValueIdxGateThunk);
     symbolTable_->add_function("pathContainsIdx", &PathContainsIdxThunk);
 
     if (!parser_->compile(compiledString_, *expression_)) {
@@ -610,28 +696,33 @@ bool CompiledExpression::Evaluate(PluginContext* ctx, const PluginSDK::RadarEnti
 
     curCtx_ = ctx;
     curEnt_ = &entity;
+    buffsCacheReady_ = false;
+    buffsCacheValid_ = false;
+    buffsCacheUsedFallback_ = false;
 
-    // Debug dump: always emit one line per evaluated entity id per run.
-    // This tells us whether BuffsAddr is present and what ReadBuffsComponent returned.
-    // Buffs debug dump: try to resolve an address (snapshot cache or debug list fallback),
-    // read it if possible, and log once per entity. We reuse the same data for TRUE logging
-    // so we don't lose the actual trigger due to de-dupe.
+    // Debug dump: only when enabled (otherwise it would dominate CPU).
     PluginSDK::PluginBuffsData dbgData{};
     PluginSDK::PluginBuffsData* dbgPtr = nullptr;
     bool usedFallback = false;
     uintptr_t resolvedBuffsAddr = 0;
 
-    if (ctx && ctx->ReadBuffsComponent) {
-        resolvedBuffsAddr = ResolveBuffsAddr(ctx, entity, usedFallback);
-        if (resolvedBuffsAddr != 0) {
-            dbgData = ctx->ReadBuffsComponent(resolvedBuffsAddr);
-            dbgPtr = &dbgData;
-            AppendBuffsDebugLine(entity, dbgPtr, usedFallback ? "Evaluate_FallbackAddr" : "Evaluate");
+    bool dumpEnabled = false;
+#if AUTOREFLEX_BUFFS_DUMP
+    { std::lock_guard<std::mutex> lock(g_buffsDumpMu); dumpEnabled = g_buffsDumpEnabled; }
+#endif
+    if (dumpEnabled) {
+        if (ctx && ctx->ReadBuffsComponent) {
+            resolvedBuffsAddr = ResolveBuffsAddr(ctx, entity, usedFallback);
+            if (resolvedBuffsAddr != 0) {
+                dbgData = ctx->ReadBuffsComponent(resolvedBuffsAddr);
+                dbgPtr = &dbgData;
+                AppendBuffsDebugLine(entity, dbgPtr, usedFallback ? "Evaluate_FallbackAddr" : "Evaluate");
+            } else {
+                AppendBuffsDebugLine(entity, nullptr, "Evaluate_NoBuffsAddr");
+            }
         } else {
-            AppendBuffsDebugLine(entity, nullptr, "Evaluate_NoBuffsAddr");
+            AppendBuffsDebugLine(entity, nullptr, "Evaluate_NoBuffsAPI");
         }
-    } else {
-        AppendBuffsDebugLine(entity, nullptr, "Evaluate_NoBuffsAPI");
     }
 
     // Reset per-evaluation needle caches only when actually used.
@@ -644,27 +735,57 @@ bool CompiledExpression::Evaluate(PluginContext* ctx, const PluginSDK::RadarEnti
         pathLowerReady_ = false;
     }
 
-    // Cursor distance: only compute if the expression mentions e_CursorDistPx.
-    if (needsCursorPx_ && ctx && ctx->WorldToScreen) {
+    // Cursor distance: only compute if the expression needs it (directly or via buff gates).
+    if ((needsCursorPx_ || needsCursorSq_ || needsCursorForBuffGate_) && ctx && ctx->WorldToScreen) {
         float sx = 0.f, sy = 0.f;
         if (ctx->WorldToScreen(entity.WorldX, entity.WorldY, entity.WorldZ, &sx, &sy)) {
             const ImVec2 mouse = ImGui::GetMousePos();
             const float dx = sx - mouse.x;
             const float dy = sy - mouse.y;
-            e_CursorDistPx = std::sqrt(dx * dx + dy * dy);
+            const double d2 = static_cast<double>(dx * dx + dy * dy);
+            e_CursorDistSq = d2;
+            if (needsCursorPx_) {
+                e_CursorDistPx = std::sqrt(d2);
+            }
         } else {
             e_CursorDistPx = 1.0e9;
+            e_CursorDistSq = 1.0e18;
         }
     } else {
         e_CursorDistPx = 1.0e9;
+        e_CursorDistSq = 1.0e18;
     }
 
     const double result = expression_->value();
-    if (result != 0.0) {
+    if (dumpEnabled && result != 0.0) {
         // When something *actually matches the rule*, ALWAYS log it (see IsTrueTag()).
         AppendBuffsDebugLine(entity, dbgPtr, usedFallback ? "Evaluate_TRUE_FallbackAddr" : "Evaluate_TRUE");
     }
     return result != 0.0;
+}
+
+const PluginSDK::PluginBuffsData* CompiledExpression::GetBuffsDataCached(bool& outUsedFallback) const
+{
+    outUsedFallback = false;
+    if (!curCtx_ || !curEnt_) return nullptr;
+    if (!curCtx_->ReadBuffsComponent) return nullptr;
+
+    if (!buffsCacheReady_) {
+        bool usedFallback = false;
+        const uintptr_t buffsAddr = ResolveBuffsAddr(curCtx_, *curEnt_, usedFallback);
+        buffsCacheUsedFallback_ = usedFallback;
+        if (!buffsAddr) {
+            buffsCacheValid_ = false;
+            buffsCacheReady_ = true;
+        } else {
+            buffsCacheData_ = curCtx_->ReadBuffsComponent(buffsAddr);
+            buffsCacheValid_ = buffsCacheData_.Valid;
+            buffsCacheReady_ = true;
+        }
+    }
+
+    outUsedFallback = buffsCacheUsedFallback_;
+    return buffsCacheValid_ ? &buffsCacheData_ : nullptr;
 }
 
 bool CompiledExpression::HasBuffIdx(int idx) const
@@ -677,26 +798,29 @@ bool CompiledExpression::HasBuffIdx(int idx) const
         return buffResultCache_[idx] == 1;
 
     bool usedFallback = false;
-    const uintptr_t buffsAddr = ResolveBuffsAddr(curCtx_, *curEnt_, usedFallback);
-    if (!buffsAddr) {
+    const auto* data = GetBuffsDataCached(usedFallback);
+    if (!data) {
         AppendBuffsDebugLine(*curEnt_, nullptr, "ReadBuffsComponent_NoAddr");
         if (idx < static_cast<int>(buffResultCache_.size())) buffResultCache_[idx] = 0;
         return false;
     }
-    const auto data = curCtx_->ReadBuffsComponent(buffsAddr);
-    AppendBuffsDebugLine(*curEnt_, &data, usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
-    if (!data.Valid) {
-        if (idx < static_cast<int>(buffResultCache_.size())) buffResultCache_[idx] = 0;
-        return false;
-    }
+    AppendBuffsDebugLine(*curEnt_, data, usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
 
     bool found = false;
     const auto& needle = buffNeedles_[idx];
-    for (const auto& b : data.Buffs) {
+    for (const auto& b : data->Buffs) {
         if (b.Name == needle) { found = true; break; }
     }
     if (idx < static_cast<int>(buffResultCache_.size())) buffResultCache_[idx] = found ? 1 : 0;
     return found;
+}
+
+bool CompiledExpression::HasBuffIdxGate(int idx, double limitSq) const
+{
+    // If the entity is outside the nearCursor radius, the overall monsterCount
+    // expression should be false anyway; skip expensive buff reads.
+    if (e_CursorDistSq > limitSq) return false;
+    return HasBuffIdx(idx);
 }
 
 double CompiledExpression::HasBuffValueIdx(int idx) const
@@ -709,27 +833,27 @@ double CompiledExpression::HasBuffValueIdx(int idx) const
         return static_cast<double>(buffValueCache_[idx]);
 
     bool usedFallback = false;
-    const uintptr_t buffsAddr = ResolveBuffsAddr(curCtx_, *curEnt_, usedFallback);
-    if (!buffsAddr) {
+    const auto* data = GetBuffsDataCached(usedFallback);
+    if (!data) {
         AppendBuffsDebugLine(*curEnt_, nullptr, "ReadBuffsComponent_NoAddr");
         if (idx < static_cast<int>(buffValueCache_.size())) buffValueCache_[idx] = 0;
         return 0.0;
     }
-
-    const auto data = curCtx_->ReadBuffsComponent(buffsAddr);
-    AppendBuffsDebugLine(*curEnt_, &data, usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
-    if (!data.Valid) {
-        if (idx < static_cast<int>(buffValueCache_.size())) buffValueCache_[idx] = 0;
-        return 0.0;
-    }
+    AppendBuffsDebugLine(*curEnt_, data, usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
 
     int16_t value = 0;
     const auto& needle = buffNeedles_[idx];
-    for (const auto& b : data.Buffs) {
+    for (const auto& b : data->Buffs) {
         if (b.Name == needle) { value = static_cast<int16_t>(b.Charges); break; }
     }
     if (idx < static_cast<int>(buffValueCache_.size())) buffValueCache_[idx] = value;
     return static_cast<double>(value);
+}
+
+double CompiledExpression::HasBuffValueIdxGate(int idx, double limitSq) const
+{
+    if (e_CursorDistSq > limitSq) return 0.0;
+    return HasBuffValueIdx(idx);
 }
 
 bool CompiledExpression::PathContainsIdx(int idx) const
@@ -776,7 +900,7 @@ bool ScriptEngine::ValidateExpression(const std::string& expr, std::string& erro
         "e_GridPositionX", "e_GridPositionY",
         "e_WorldX", "e_WorldY", "e_WorldZ",
         "e_CurrentHP", "e_MaxHP", "e_CurrentES", "e_MaxES",
-        "e_IsSleeping", "e_CursorDistPx", "e_Reaction",
+        "e_IsSleeping", "e_CursorDistPx", "e_CursorDistSq", "e_Reaction",
     };
     for (const char* name : kVarNames) symbolTable.add_variable(name, dummy);
     symbolTable.add_constants();
@@ -788,6 +912,8 @@ bool ScriptEngine::ValidateExpression(const std::string& expr, std::string& erro
 
     symbolTable.add_function("hasBuffIdx",      &Dummy1Thunk);
     symbolTable.add_function("hasBuffValueIdx", &Dummy1Thunk);
+    symbolTable.add_function("hasBuffIdxGate",      &Dummy2Thunk);
+    symbolTable.add_function("hasBuffValueIdxGate", &Dummy2Thunk);
     symbolTable.add_function("pathContainsIdx", &Dummy1Thunk);
 
     if (!parser.compile(compiled, expression)) {

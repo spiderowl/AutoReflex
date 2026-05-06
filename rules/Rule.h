@@ -13,6 +13,11 @@
 namespace AutoReflex {
 namespace Rules {
 
+enum class RuleRoot : uint8_t {
+    Hostile = 0,   // monsterCount
+    Friendly = 1,  // friendlyMonsterCount
+};
+
 struct Rule {
     // User-editable fields (saved to disk)
     std::string  Name;
@@ -30,6 +35,7 @@ struct Rule {
     bool                                  LastEvalResult = false;
     std::chrono::steady_clock::time_point LastFired;
     bool                                  EverFired    = false;
+    RuleRoot                              Root = RuleRoot::Hostile;
 };
 
 } // namespace Rules

@@ -20,6 +20,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <cstdint>
 #include "sdk/PluginGameData.h"
 
 #include "exprtk.hpp"
@@ -44,6 +45,8 @@ public:
     // Internal helpers used by EXPRTK thunks.
     bool   HasBuffIdx(int idx) const;
     double HasBuffValueIdx(int idx) const;
+    bool   HasBuffIdxGate(int idx, double limitSq) const;
+    double HasBuffValueIdxGate(int idx, double limitSq) const;
     bool   PathContainsIdx(int idx) const;
 
 private:
@@ -79,6 +82,8 @@ private:
     mutable double e_MaxES;
     mutable double e_IsSleeping;
     mutable double e_CursorDistPx;
+    // Squared cursor distance in pixels (avoids sqrt in common filters).
+    mutable double e_CursorDistSq;
     mutable double e_Reaction;
 
     // --- Per-evaluation context for thunks ---
@@ -94,11 +99,21 @@ private:
     mutable std::string pathLowerScratch_;
     mutable bool        pathLowerReady_ = false;
 
+    // Per-evaluation cached Buffs component (avoids repeated ReadBuffsComponent calls).
+    mutable bool                       buffsCacheReady_ = false;
+    mutable bool                       buffsCacheUsedFallback_ = false;
+    mutable bool                       buffsCacheValid_ = false;
+    mutable PluginSDK::PluginBuffsData buffsCacheData_{};
+
     // --- "Needs" flags: avoid host-bridge calls when the expression doesn't
     //     actually reference these fields/functions. Set during Compile. ---
     bool needsCursorPx_  = false;
+    bool needsCursorSq_  = false;
     bool needsBuffs_     = false;   // hasBuffIdx / hasBuffValueIdx in expr
     bool needsPath_      = false;   // pathContainsIdx in expr
+    bool needsCursorForBuffGate_ = false; // hasBuff*Gate(...) requires cursor projection
+
+    const PluginSDK::PluginBuffsData* GetBuffsDataCached(bool& outUsedFallback) const;
 };
 
 class ScriptEngine {
