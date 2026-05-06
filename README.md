@@ -100,3 +100,11 @@ If you need to bypass the default `monsterCount` filters, use raw entity fields.
 ## Troubleshooting
 
 - **Expression syntax error / Translated:** the rule was converted internally and then failed to compile. The `Translated:` text shows what AutoReflex actually tried to compile.
+
+---
+
+## Developer notes (internals)
+
+If you’re maintaining AutoReflex (performance/correctness), see:
+
+- `docs/AutoReflex-Internals.md`
