@@ -19,6 +19,7 @@
 #include "ui/SettingsPanel.h"
 
 #include <imgui.h>
+#include <filesystem>
 
 using namespace PluginSDK;
 
@@ -40,6 +41,17 @@ extern "C" PLUGIN_API void DestroyPlugin(IPlugin* plugin) {
 
 void AutoReflexPlugin::SetPluginDirectory(const char* dir) {
     m_Directory = dir;
+    // Put debug dumps next to other config so host CWD doesn't matter.
+    try {
+        std::filesystem::path p = std::filesystem::path(m_Directory) / "config";
+        std::filesystem::create_directories(p);
+        ScriptEngine::SetBuffsDumpPath((p / "AutoReflex_BuffsDump.txt").string());
+        // Debug dump is OFF by default; enable by creating:
+        //   <pluginDir>/config/enable_buffs_dump.txt
+        ScriptEngine::SetBuffsDumpEnabled(std::filesystem::exists(p / "enable_buffs_dump.txt"));
+    } catch (...) {
+        // Best-effort only; debug dump is optional.
+    }
 }
 
 void AutoReflexPlugin::SetContext(PluginContext* context) {
@@ -51,6 +63,15 @@ void AutoReflexPlugin::SetContext(PluginContext* context) {
 
 void AutoReflexPlugin::OnEnable(bool /*isGameOpened*/) {
     if (!m_ScriptEngine.IsInitialized()) m_ScriptEngine.Initialize();
+
+    // Ensure dump path is set even if host calls SetPluginDirectory earlier/later.
+    try {
+        std::filesystem::path p = std::filesystem::path(m_Directory) / "config";
+        std::filesystem::create_directories(p);
+        ScriptEngine::SetBuffsDumpPath((p / "AutoReflex_BuffsDump.txt").string());
+        ScriptEngine::SetBuffsDumpEnabled(std::filesystem::exists(p / "enable_buffs_dump.txt"));
+    } catch (...) {
+    }
 
     if (!m_RuleManager) {
         m_RuleManager = std::make_unique<AutoReflex::Rules::RuleManager>();

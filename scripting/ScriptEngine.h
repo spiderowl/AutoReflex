@@ -109,6 +109,12 @@ public:
     bool Initialize();
     bool IsInitialized() const { return initialized_; }
 
+    // Debugging: override where AutoReflex writes the buffs dump log.
+    // This is a global path used by the expression engine; intended to be set
+    // by the plugin once from SetPluginDirectory().
+    static void SetBuffsDumpPath(const std::string& path);
+    static void SetBuffsDumpEnabled(bool enabled);
+
     static bool ValidateExpression(const std::string& expr, std::string& errorMsg);
 
 private:

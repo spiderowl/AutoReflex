@@ -14,6 +14,11 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <mutex>
+#include <unordered_set>
+#include <chrono>
+#include <filesystem>
 
 using symbol_table_t = exprtk::symbol_table<double>;
 using expression_t   = exprtk::expression<double>;
@@ -213,6 +218,7 @@ bool TranslateMonsterCountChain(const std::string& s,
     conds.push_back("(e_Reaction==0)");
     conds.push_back("(e_CurrentHP>0)");
     conds.push_back("(e_IsSleeping==0)");
+    int hiddenMonsterIdx = -1;
 
     bool sawNearCursor = false;
 
@@ -239,6 +245,9 @@ bool TranslateMonsterCountChain(const std::string& s,
         } else if (method == "hasBuff") {
             int idx = InternNeedle(buffNeedles, arg);
             conds.push_back("hasBuffIdx(" + std::to_string(idx) + ")");
+        } else if (method == "notHasBuff") {
+            int idx = InternNeedle(buffNeedles, arg);
+            conds.push_back("(hasBuffIdx(" + std::to_string(idx) + ")==0)");
         } else if (method == "hasName") {
             int idx = InternNeedle(pathNeedles, arg);
             conds.push_back("pathContainsIdx(" + std::to_string(idx) + ")");
@@ -287,6 +296,10 @@ bool TranslateMonsterCountChain(const std::string& s,
     if (!sawNearCursor) {
         conds.push_back("(e_CursorDistPx<=" + std::to_string(kDefaultNearCursorPx) + ")");
     }
+
+    // Dormant / unrevealed packs often carry hidden_monster on Buffs; exclude by default.
+    hiddenMonsterIdx = InternNeedle(buffNeedles, "hidden_monster");
+    conds.push_back("(hasBuffIdx(" + std::to_string(hiddenMonsterIdx) + ")==0)");
 
     outExpr = "(";
     for (size_t k = 0; k < conds.size(); ++k) {
@@ -401,7 +414,134 @@ bool Contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
+std::mutex g_buffsDumpMu;
+std::string g_buffsDumpPath = "AutoReflex_BuffsDump.txt";
+bool g_buffsDumpEnabled = false;
+
+static bool IsTrueTag(const char* tag)
+{
+    if (!tag) return false;
+    // Any line that proves the entity actually matched the expression.
+    return std::string(tag).rfind("Evaluate_TRUE", 0) == 0;
+}
+
+uintptr_t TryGetBuffsAddrFromDebugList(PluginContext* ctx, uint32_t entityId)
+{
+    if (!ctx || !ctx->GetEntityDebugList) return 0;
+    // Cache the debug list scan to avoid O(monsters * entities) work each tick.
+    static std::mutex s_cacheMu;
+    static std::unordered_map<uint32_t, uintptr_t> s_buffsAddrById;
+    static uint64_t s_lastRefreshMs = 0;
+
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    const uint64_t nowMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+
+    std::lock_guard<std::mutex> lock(s_cacheMu);
+    // Refresh at most twice per second.
+    if (nowMs - s_lastRefreshMs > 500) {
+        s_buffsAddrById.clear();
+        const auto list = ctx->GetEntityDebugList();
+        s_buffsAddrById.reserve(list.size());
+        for (const auto& e : list) {
+            uintptr_t buffsAddr = 0;
+            for (const auto& kv : e.ComponentAddresses) {
+                std::string k = kv.first;
+                LowerAsciiInPlace(k);
+                if (k.find("buff") != std::string::npos) { buffsAddr = kv.second; break; }
+            }
+            if (buffsAddr) s_buffsAddrById.emplace(e.Id, buffsAddr);
+        }
+        s_lastRefreshMs = nowMs;
+    }
+
+    auto it = s_buffsAddrById.find(entityId);
+    return (it == s_buffsAddrById.end()) ? 0 : it->second;
+}
+
+uintptr_t ResolveBuffsAddr(PluginContext* ctx, const PluginSDK::RadarEntity& ent, bool& outUsedFallback)
+{
+    outUsedFallback = false;
+    uintptr_t addr = ent.ComponentCache.BuffsAddr;
+    if (addr != 0) return addr;
+    addr = TryGetBuffsAddrFromDebugList(ctx, static_cast<uint32_t>(ent.Id));
+    if (addr != 0) outUsedFallback = true;
+    return addr;
+}
+
+void AppendBuffsDebugLine(const PluginSDK::RadarEntity& ent,
+                          const PluginSDK::PluginBuffsData* dataOrNull,
+                          const char* tag)
+{
+    // User-requested debugging: dump what ReadBuffsComponent returned.
+    // Intentionally append-only and can be large.
+    {
+        std::lock_guard<std::mutex> lock(g_buffsDumpMu);
+        if (!g_buffsDumpEnabled) return;
+    }
+    static std::mutex s_mu;
+    static std::unordered_set<uint32_t> s_loggedOnce;
+
+    const uint32_t id = static_cast<uint32_t>(ent.Id);
+    {
+        std::lock_guard<std::mutex> lock(s_mu);
+        // Log each entity once per run, but ALWAYS log TRUE matches even if already seen.
+        if (!IsTrueTag(tag) && !s_loggedOnce.insert(id).second) return;
+    }
+
+    std::string pathCopy;
+    { std::lock_guard<std::mutex> lock(g_buffsDumpMu); pathCopy = g_buffsDumpPath; }
+
+    // Ensure parent folder exists (we usually point at <pluginDir>/config/...).
+    try {
+        std::filesystem::path p(pathCopy);
+        if (p.has_parent_path()) {
+            std::filesystem::create_directories(p.parent_path());
+        }
+    } catch (...) {
+    }
+
+    std::ofstream f(pathCopy.c_str(), std::ios::out | std::ios::app);
+    if (!f.is_open()) return;
+
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+
+    f << "t_ms=" << ms
+      << " tag=" << (tag ? tag : "")
+      << " entId=" << ent.Id
+      << " reaction=" << static_cast<int>(ent.Reaction)
+      << " hp=" << ent.CurrentHP
+      << " sleeping=" << (ent.IsSleeping ? 1 : 0)
+      << " buffsAddr=0x" << std::hex << ent.ComponentCache.BuffsAddr << std::dec;
+
+    if (!dataOrNull) {
+        f << " valid=<null>\n";
+        return;
+    }
+
+    f << " valid=" << (dataOrNull->Valid ? 1 : 0)
+      << " buffCount=" << dataOrNull->Buffs.size()
+      << "\n";
+
+    for (size_t i = 0; i < dataOrNull->Buffs.size(); ++i) {
+        f << "  [" << i << "] name=\"" << dataOrNull->Buffs[i].Name << "\"\n";
+    }
+}
+
 } // anonymous namespace
+
+void ScriptEngine::SetBuffsDumpPath(const std::string& path)
+{
+    if (path.empty()) return;
+    std::lock_guard<std::mutex> lock(g_buffsDumpMu);
+    g_buffsDumpPath = path;
+}
+
+void ScriptEngine::SetBuffsDumpEnabled(bool enabled)
+{
+    std::lock_guard<std::mutex> lock(g_buffsDumpMu);
+    g_buffsDumpEnabled = enabled;
+}
 
 
 void CompiledExpression::ComputeNeedsFlags()
@@ -471,6 +611,29 @@ bool CompiledExpression::Evaluate(PluginContext* ctx, const PluginSDK::RadarEnti
     curCtx_ = ctx;
     curEnt_ = &entity;
 
+    // Debug dump: always emit one line per evaluated entity id per run.
+    // This tells us whether BuffsAddr is present and what ReadBuffsComponent returned.
+    // Buffs debug dump: try to resolve an address (snapshot cache or debug list fallback),
+    // read it if possible, and log once per entity. We reuse the same data for TRUE logging
+    // so we don't lose the actual trigger due to de-dupe.
+    PluginSDK::PluginBuffsData dbgData{};
+    PluginSDK::PluginBuffsData* dbgPtr = nullptr;
+    bool usedFallback = false;
+    uintptr_t resolvedBuffsAddr = 0;
+
+    if (ctx && ctx->ReadBuffsComponent) {
+        resolvedBuffsAddr = ResolveBuffsAddr(ctx, entity, usedFallback);
+        if (resolvedBuffsAddr != 0) {
+            dbgData = ctx->ReadBuffsComponent(resolvedBuffsAddr);
+            dbgPtr = &dbgData;
+            AppendBuffsDebugLine(entity, dbgPtr, usedFallback ? "Evaluate_FallbackAddr" : "Evaluate");
+        } else {
+            AppendBuffsDebugLine(entity, nullptr, "Evaluate_NoBuffsAddr");
+        }
+    } else {
+        AppendBuffsDebugLine(entity, nullptr, "Evaluate_NoBuffsAPI");
+    }
+
     // Reset per-evaluation needle caches only when actually used.
     if (needsBuffs_) {
         buffResultCache_.assign(buffNeedles_.size(), -1);
@@ -497,6 +660,10 @@ bool CompiledExpression::Evaluate(PluginContext* ctx, const PluginSDK::RadarEnti
     }
 
     const double result = expression_->value();
+    if (result != 0.0) {
+        // When something *actually matches the rule*, ALWAYS log it (see IsTrueTag()).
+        AppendBuffsDebugLine(entity, dbgPtr, usedFallback ? "Evaluate_TRUE_FallbackAddr" : "Evaluate_TRUE");
+    }
     return result != 0.0;
 }
 
@@ -504,13 +671,20 @@ bool CompiledExpression::HasBuffIdx(int idx) const
 {
     if (!curCtx_ || !curEnt_) return false;
     if (idx < 0 || idx >= static_cast<int>(buffNeedles_.size())) return false;
-    if (!curEnt_->ComponentCache.HasBuffs()) return false;
     if (!curCtx_->ReadBuffsComponent) return false;
 
     if (idx < static_cast<int>(buffResultCache_.size()) && buffResultCache_[idx] != -1)
         return buffResultCache_[idx] == 1;
 
-    const auto data = curCtx_->ReadBuffsComponent(curEnt_->ComponentCache.BuffsAddr);
+    bool usedFallback = false;
+    const uintptr_t buffsAddr = ResolveBuffsAddr(curCtx_, *curEnt_, usedFallback);
+    if (!buffsAddr) {
+        AppendBuffsDebugLine(*curEnt_, nullptr, "ReadBuffsComponent_NoAddr");
+        if (idx < static_cast<int>(buffResultCache_.size())) buffResultCache_[idx] = 0;
+        return false;
+    }
+    const auto data = curCtx_->ReadBuffsComponent(buffsAddr);
+    AppendBuffsDebugLine(*curEnt_, &data, usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
     if (!data.Valid) {
         if (idx < static_cast<int>(buffResultCache_.size())) buffResultCache_[idx] = 0;
         return false;
@@ -529,13 +703,21 @@ double CompiledExpression::HasBuffValueIdx(int idx) const
 {
     if (!curCtx_ || !curEnt_) return 0.0;
     if (idx < 0 || idx >= static_cast<int>(buffNeedles_.size())) return 0.0;
-    if (!curEnt_->ComponentCache.HasBuffs()) return 0.0;
     if (!curCtx_->ReadBuffsComponent) return 0.0;
 
     if (idx < static_cast<int>(buffValueCache_.size()) && buffValueCache_[idx] != static_cast<int16_t>(-32768))
         return static_cast<double>(buffValueCache_[idx]);
 
-    const auto data = curCtx_->ReadBuffsComponent(curEnt_->ComponentCache.BuffsAddr);
+    bool usedFallback = false;
+    const uintptr_t buffsAddr = ResolveBuffsAddr(curCtx_, *curEnt_, usedFallback);
+    if (!buffsAddr) {
+        AppendBuffsDebugLine(*curEnt_, nullptr, "ReadBuffsComponent_NoAddr");
+        if (idx < static_cast<int>(buffValueCache_.size())) buffValueCache_[idx] = 0;
+        return 0.0;
+    }
+
+    const auto data = curCtx_->ReadBuffsComponent(buffsAddr);
+    AppendBuffsDebugLine(*curEnt_, &data, usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
     if (!data.Valid) {
         if (idx < static_cast<int>(buffValueCache_.size())) buffValueCache_[idx] = 0;
         return 0.0;

@@ -45,8 +45,9 @@ Add these after the root, like: `monsterCount.nearCursor(150) > 0`
 
 - **`.nearCursor(N)`**: only count enemies within `N` pixels of your cursor (overrides the default of `200`)
 - **`.type(any|normal|magic|rare|unique|atleastmagic|atleastrare|atleastunique)`**
-- **`.hasBuff("buff_name")`**
-- **`.hasBuffValue("buff_name", N)`**: buff charges/stacks value equals `N`
+- **`.hasBuff("buff_prefix")`**
+- **`.notHasBuff("buff_prefix")`**
+- **`.hasBuffValue("buff_prefix", N)`**: buff charges/stacks value equals `N`
 - **`.hasName("text")`**: case-insensitive substring match on monster metadata path ("skeleton", etc.)
 
 ### Picking good `nearCursor(N)` values
