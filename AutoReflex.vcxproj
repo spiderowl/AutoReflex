@@ -125,7 +125,6 @@
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
-    <ClCompile Include="imgui\misc\cpp\imgui_stdlib.cpp" />
     <ClCompile Include="rules\RuleManager.cpp" />
     <ClCompile Include="scripting\ScriptEngine.cpp" />
     <ClCompile Include="storage\RuleStore.cpp" />
@@ -138,7 +137,6 @@
     <ClInclude Include="core\ShouldExecute.h" />
     <ClInclude Include="game\KeySender.h" />
     <ClInclude Include="game\MonsterHelpers.h" />
-    <ClInclude Include="imgui\misc\cpp\imgui_stdlib.h" />
     <ClInclude Include="rules\Rule.h" />
     <ClInclude Include="rules\RuleManager.h" />
     <ClInclude Include="scripting\exprtk.hpp" />

@@ -2,7 +2,7 @@
 // Settings panel with tabs: Rules, Settings.
 //
 // Text inputs bind directly to std::string via ImGuiInputTextFlags_CallbackResize
-// so we don't pay for a 16 KB stack copy + std::string assign on every frame
+// so we don't pay for a large stack copy + std::string assign on every frame
 // the editor is open.
 
 #include "SettingsPanel.h"
@@ -11,7 +11,6 @@
 #include "../storage/RuleStore.h"
 
 #include <imgui.h>
-#include <imgui_stdlib.h>
 
 #include <algorithm>
 
@@ -20,14 +19,61 @@ namespace UI {
 
 namespace {
 
-// Wrappers around ImGui's official std::string adapter (imgui_stdlib).
-// Both bind directly to the std::string and use the resize callback under
-// the hood — no per-frame stack buffers, no extra copies.
-bool InputStringMultiline(const char* label, std::string& s, const ImVec2& size) {
-    return ImGui::InputTextMultiline(label, &s, size);
+struct InputTextCallback_UserData
+{
+    std::string*            Str = nullptr;
+    ImGuiInputTextCallback  ChainCallback = nullptr;
+    void*                   ChainCallbackUserData = nullptr;
+};
+
+static int InputTextCallback(ImGuiInputTextCallbackData* data)
+{
+    auto* user_data = static_cast<InputTextCallback_UserData*>(data->UserData);
+    if (!user_data || !user_data->Str) return 0;
+
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+        std::string* str = user_data->Str;
+        str->resize(static_cast<size_t>(data->BufTextLen));
+        data->Buf = const_cast<char*>(str->c_str());
+        return 0;
+    }
+
+    if (user_data->ChainCallback) {
+        data->UserData = user_data->ChainCallbackUserData;
+        return user_data->ChainCallback(data);
+    }
+    return 0;
 }
-bool InputString(const char* label, std::string& s, ImGuiInputTextFlags flags = 0) {
-    return ImGui::InputText(label, &s, flags);
+
+// Minimal std::string adapter (same mechanism as ImGui's misc/cpp/imgui_stdlib,
+// but kept local so our vendored imgui/ folder matches upstream ExamplePlugin).
+static bool InputString(const char* label, std::string& str, ImGuiInputTextFlags flags = 0,
+                        ImGuiInputTextCallback callback = nullptr, void* user_data = nullptr)
+{
+    IM_ASSERT((flags & ImGuiInputTextFlags_CallbackResize) == 0);
+    flags |= ImGuiInputTextFlags_CallbackResize;
+
+    InputTextCallback_UserData cb_user_data;
+    cb_user_data.Str = &str;
+    cb_user_data.ChainCallback = callback;
+    cb_user_data.ChainCallbackUserData = user_data;
+
+    return ImGui::InputText(label, const_cast<char*>(str.c_str()), str.capacity() + 1, flags, InputTextCallback, &cb_user_data);
+}
+
+static bool InputStringMultiline(const char* label, std::string& str, const ImVec2& size,
+                                 ImGuiInputTextFlags flags = 0,
+                                 ImGuiInputTextCallback callback = nullptr, void* user_data = nullptr)
+{
+    IM_ASSERT((flags & ImGuiInputTextFlags_CallbackResize) == 0);
+    flags |= ImGuiInputTextFlags_CallbackResize;
+
+    InputTextCallback_UserData cb_user_data;
+    cb_user_data.Str = &str;
+    cb_user_data.ChainCallback = callback;
+    cb_user_data.ChainCallbackUserData = user_data;
+
+    return ImGui::InputTextMultiline(label, const_cast<char*>(str.c_str()), str.capacity() + 1, size, flags, InputTextCallback, &cb_user_data);
 }
 
 } // namespace
@@ -180,8 +226,7 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
 
         ImGui::PushStyleColor(ImGuiCol_Text, textColor);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 4.0f));
-        ImGui::InputTextMultiline("##CompileOutput", &compileText, editSize,
-            ImGuiInputTextFlags_ReadOnly);
+        InputStringMultiline("##CompileOutput", compileText, editSize, ImGuiInputTextFlags_ReadOnly);
         ImGui::PopStyleVar();
         ImGui::PopStyleColor();
 
