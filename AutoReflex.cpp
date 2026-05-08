@@ -23,10 +23,6 @@
 
 using namespace PluginSDK;
 
-// ============================================================================
-// Factory exports (required by host)
-// ============================================================================
-
 extern "C" PLUGIN_API IPlugin* CreatePlugin() {
     return new AutoReflexPlugin();
 }
@@ -35,41 +31,42 @@ extern "C" PLUGIN_API void DestroyPlugin(IPlugin* plugin) {
     delete plugin;
 }
 
-// ============================================================================
-// IPlugin implementation
-// ============================================================================
-
-void AutoReflexPlugin::SetPluginDirectory(const char* dir) {
-    m_Directory = dir;
-    // Put debug dumps next to other config so host CWD doesn't matter.
+void AutoReflexPlugin::SetPluginDirectory(const char* pluginDirectoryPath) {
+    m_Directory = pluginDirectoryPath ? pluginDirectoryPath : "";
     try {
-        std::filesystem::path p = std::filesystem::path(m_Directory) / "config";
-        std::filesystem::create_directories(p);
-        ScriptEngine::SetBuffsDumpPath((p / "AutoReflex_BuffsDump.txt").string());
-        // Debug dump is OFF by default; enable by creating:
-        //   <pluginDir>/config/enable_buffs_dump.txt
-        ScriptEngine::SetBuffsDumpEnabled(std::filesystem::exists(p / "enable_buffs_dump.txt"));
+        const std::filesystem::path pluginConfigDirectoryPath =
+            std::filesystem::path(m_Directory) / "config";
+        std::filesystem::create_directories(pluginConfigDirectoryPath);
+
+        ScriptEngine::SetBuffsDumpPath(
+            (pluginConfigDirectoryPath / "AutoReflex_BuffsDump.txt").string());
+        ScriptEngine::SetBuffsDumpEnabled(
+            std::filesystem::exists(pluginConfigDirectoryPath / "enable_buffs_dump.txt"));
     } catch (...) {
-        // Best-effort only; debug dump is optional.
     }
 }
 
-void AutoReflexPlugin::SetContext(PluginContext* context) {
-    m_Context = context;
+void AutoReflexPlugin::SetContext(PluginContext* pluginContext) {
+    m_Context = pluginContext;
     if (m_Context && m_Context->ImGuiContext) {
         ImGui::SetCurrentContext(static_cast<ImGuiContext*>(m_Context->ImGuiContext));
     }
 }
 
 void AutoReflexPlugin::OnEnable(bool /*isGameOpened*/) {
-    if (!m_ScriptEngine.IsInitialized()) m_ScriptEngine.Initialize();
+    if (!m_ScriptEngine.HasInitializedScriptEngineSubsystem()) {
+        m_ScriptEngine.InitializeScriptEngineSubsystem();
+    }
 
-    // Ensure dump path is set even if host calls SetPluginDirectory earlier/later.
     try {
-        std::filesystem::path p = std::filesystem::path(m_Directory) / "config";
-        std::filesystem::create_directories(p);
-        ScriptEngine::SetBuffsDumpPath((p / "AutoReflex_BuffsDump.txt").string());
-        ScriptEngine::SetBuffsDumpEnabled(std::filesystem::exists(p / "enable_buffs_dump.txt"));
+        const std::filesystem::path pluginConfigDirectoryPath =
+            std::filesystem::path(m_Directory) / "config";
+        std::filesystem::create_directories(pluginConfigDirectoryPath);
+
+        ScriptEngine::SetBuffsDumpPath(
+            (pluginConfigDirectoryPath / "AutoReflex_BuffsDump.txt").string());
+        ScriptEngine::SetBuffsDumpEnabled(
+            std::filesystem::exists(pluginConfigDirectoryPath / "enable_buffs_dump.txt"));
     } catch (...) {
     }
 
@@ -95,7 +92,6 @@ void AutoReflexPlugin::OnDisable() {
 void AutoReflexPlugin::DrawSettings() {
     AutoReflex::UI::SettingsPanel::Draw(this);
 
-    // Test fire keeps running in the background even when settings is closed.
     if (m_TestFireEnabled) {
         const auto now = std::chrono::steady_clock::now();
         if (now - m_LastTestFire >= std::chrono::milliseconds(static_cast<uint32_t>(m_TestFireCooldownSec * 1000.0f))) {
@@ -113,14 +109,17 @@ void AutoReflexPlugin::DrawUI() {
     auto snapshot = m_Context->GetSnapshot ? m_Context->GetSnapshot() : nullptr;
     if (!snapshot) return;
 
-    // Reason is unused (no UI to display it); fits SBO so no heap allocation.
-    std::string reason;
-    if (!AutoReflex::ShouldExecute(m_Context, snapshot.get(), reason)) return;
+    std::string executionGateReason;
+    if (!AutoReflex::DetermineWhetherRulesShouldExecute(
+            m_Context, snapshot.get(), executionGateReason)) {
+        return;
+    }
 
     // Throttle rule evaluation to ~60 Hz by default. Even on a 144 Hz monitor,
     // rules don't need 144 Hz cadence (cooldowns are 100s of ms).
-    if (m_RuleManager && m_EvalThrottle.ShouldEvaluate(m_EvalIntervalMs)) {
-        m_RuleManager->EvaluateAll(m_Context, snapshot.get(),
+    if (m_RuleManager &&
+        m_EvalThrottle.DetermineWhetherEvaluationShouldRunNow(m_EvalIntervalMs)) {
+        m_RuleManager->EvaluateRulesAgainstSnapshotUntilFirstFire(m_Context, snapshot.get(),
             [](const AutoReflex::Rules::Rule& rule) {
                 if (rule.Key > 0) {
                     AutoReflex::Game::PressKey(static_cast<WORD>(rule.Key));
@@ -130,7 +129,7 @@ void AutoReflexPlugin::DrawUI() {
 }
 
 void AutoReflexPlugin::SaveSettings() {
-    if (m_SettingsStore) m_SettingsStore->Save();
+    if (m_SettingsStore) m_SettingsStore->SaveSettingsToDisk();
 
     if (m_RuleStore && m_RuleManager) {
         for (auto& rule : m_RuleManager->GetRules()) {
@@ -140,9 +139,9 @@ void AutoReflexPlugin::SaveSettings() {
 }
 
 void AutoReflexPlugin::LoadSettings() {
-    if (m_SettingsStore) m_SettingsStore->Load();
+    if (m_SettingsStore) m_SettingsStore->LoadSettingsFromDisk();
 
     if (m_RuleStore && m_RuleManager) {
-        m_RuleManager->LoadRules(*m_RuleStore);
+        m_RuleManager->LoadAndCompileRulesFromStore(*m_RuleStore);
     }
 }

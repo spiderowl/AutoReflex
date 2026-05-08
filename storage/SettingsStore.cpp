@@ -62,7 +62,7 @@ SettingsStore::SettingsStore(AutoReflexPlugin* plugin)
     m_ConfigPath = p.string();
 }
 
-void SettingsStore::Load() {
+void SettingsStore::LoadSettingsFromDisk() {
     if (!m_Plugin) return;
 
     std::ifstream file(m_ConfigPath);
@@ -79,7 +79,7 @@ void SettingsStore::Load() {
     }
 }
 
-void SettingsStore::Save() {
+void SettingsStore::SaveSettingsToDisk() {
     if (!m_Plugin) return;
 
     try {

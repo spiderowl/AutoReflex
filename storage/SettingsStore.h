@@ -14,11 +14,19 @@ class SettingsStore {
 public:
     explicit SettingsStore(AutoReflexPlugin* plugin);
 
-    // Load settings from disk into plugin members
-    void Load();
+    /**
+     * Loads persisted settings into the plugin instance.
+     *
+     * @returns None.
+     */
+    void LoadSettingsFromDisk();
 
-    // Save settings from plugin members to disk
-    void Save();
+    /**
+     * Saves current plugin settings to disk.
+     *
+     * @returns None.
+     */
+    void SaveSettingsToDisk();
 
 private:
     AutoReflexPlugin* m_Plugin;

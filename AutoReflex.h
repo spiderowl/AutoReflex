@@ -26,21 +26,40 @@ class AutoReflexPlugin : public IPlugin {
     friend class AutoReflex::Storage::SettingsStore;
 
 public:
-    // --- IPlugin overrides ---
-    void SetPluginDirectory(const char* dir) override;
-    void SetContext(PluginContext* context) override;
+    /** Sets the plugin directory path provided by the host. */
+    void SetPluginDirectory(const char* pluginDirectoryPath) override;
+
+    /** Sets the host context used for snapshots and bridge calls. */
+    void SetContext(PluginContext* pluginContext) override;
+
+    /** Called by the host when the plugin is enabled. */
     void OnEnable(bool isGameOpened) override;
+
+    /** Called by the host when the plugin is disabled. */
     void OnDisable() override;
+
+    /** Draws the settings UI panel in the host-provided settings window. */
     void DrawSettings() override;
+
+    /** Host callback used as a per-frame background tick (no overlay window is drawn). */
     void DrawUI() override;
+
+    /** Persists all settings and rules to disk. */
     void SaveSettings() override;
+
     const char* GetName() override   { return "AutoReflex"; }
     int  GetSDKVersion() override    { return PLUGIN_SDK_VERSION; }
-    // Always true: DrawUI is our background tick for rule evaluation, even
-    // though it draws no visible window.
+
+    /**
+     * Indicates whether the host should call DrawUI().
+     *
+     * AutoReflex uses DrawUI() as a background tick for evaluation even though it draws no visible
+     * overlay window.
+     */
     bool WantsOverlay() override     { return true; }
 
 private:
+    /** Loads settings and rules from disk into memory. */
     void LoadSettings();
 
     // --- Host context ---

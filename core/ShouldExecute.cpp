@@ -6,61 +6,62 @@
 
 namespace AutoReflex {
 
-bool ShouldExecute(PluginContext* ctx,
-                   const PluginSDK::PluginGameSnapshot* snapshot,
-                   std::string& outReason)
+bool DetermineWhetherRulesShouldExecute(
+    PluginContext* pluginContext,
+    const PluginSDK::PluginGameSnapshot* gameSnapshot,
+    std::string& outExecutionGateReason)
 {
-    if (!ctx) {
-        outReason = "No context";
+    if (!pluginContext) {
+        outExecutionGateReason = "No context";
         return false;
     }
 
-    if (!ctx->IsAttached || !ctx->IsAttached()) {
-        outReason = "Not attached";
+    if (!pluginContext->IsAttached || !pluginContext->IsAttached()) {
+        outExecutionGateReason = "Not attached";
         return false;
     }
 
-    if (!ctx->IsInGame || !ctx->IsInGame()) {
-        outReason = "Not in game";
+    if (!pluginContext->IsInGame || !pluginContext->IsInGame()) {
+        outExecutionGateReason = "Not in game";
         return false;
     }
 
-    if (!ctx->IsGameForeground || !ctx->IsGameForeground()) {
-        outReason = "Game not foreground";
+    if (!pluginContext->IsGameForeground || !pluginContext->IsGameForeground()) {
+        outExecutionGateReason = "Game not foreground";
         return false;
     }
 
-    if (!snapshot) {
-        outReason = "No snapshot";
+    if (!gameSnapshot) {
+        outExecutionGateReason = "No snapshot";
         return false;
     }
 
-    if (snapshot->IsTown) {
-        outReason = "In town";
+    if (gameSnapshot->IsTown) {
+        outExecutionGateReason = "In town";
         return false;
     }
 
-    if (snapshot->IsHideout) {
-        outReason = "In hideout";
+    if (gameSnapshot->IsHideout) {
+        outExecutionGateReason = "In hideout";
         return false;
     }
 
     // Use the vitals already on the snapshot — same data the host would hand
     // back via GetPlayerVitals(), but without the extra bridge call.
-    const auto& vitals = snapshot->Vitals;
-    if (vitals.HPPercent <= 0) {
-        outReason = "Player dead";
+    const auto& playerVitals = gameSnapshot->Vitals;
+    if (playerVitals.HPPercent <= 0) {
+        outExecutionGateReason = "Player dead";
         return false;
     }
 
-    for (const auto& buff : vitals.Buffs) {
-        if (buff.Name == "grace_period") {
-            outReason = "Grace period";
+    for (const auto& playerBuff : playerVitals.Buffs) {
+        if (playerBuff.Name == "grace_period") {
+            outExecutionGateReason = "Grace period";
             return false;
         }
     }
 
-    outReason = "Active";
+    outExecutionGateReason = "Active";
     return true;
 }
 

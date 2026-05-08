@@ -24,23 +24,42 @@ public:
     RuleManager();
     ~RuleManager();
 
-    // Load all rules from disk and compile.
-    void LoadRules(Storage::RuleStore& store);
+    /**
+     * Loads all persisted rules from a store, compiles them, and sorts them by evaluation order.
+     *
+     * @param ruleStore Store used to load persisted rule definitions.
+     * @returns None.
+     */
+    void LoadAndCompileRulesFromStore(Storage::RuleStore& ruleStore);
 
-    // Compile a single rule's expression.
-    void CompileRule(Rule& rule);
+    /**
+     * Compiles a rule's expression and updates its runtime fields.
+     *
+     * @param rule Rule to compile in-place.
+     * @returns None.
+     */
+    void CompileRuleExpression(Rule& rule);
 
-    // Evaluate every enabled rule against monsters in `snapshot`.
-    // For each rule whose condition returns true on at least one monster,
-    // `onFire` is invoked once. The list is iterated in `Order`.
-    void EvaluateAll(
-        PluginContext* ctx,
-        const PluginSDK::PluginGameSnapshot* snapshot,
-        const std::function<void(const Rule&)>& onFire);
+    /**
+     * Evaluates enabled rules against snapshot monsters, in increasing `Order`, stopping after the
+     * first rule fires for the tick.
+     *
+     * @param pluginContext Host bridge used for evaluation (cursor projection, buffs, etc.).
+     * @param gameSnapshot Snapshot providing the entity list to scan.
+     * @param onRuleFired Callback invoked for the first rule that fires this tick.
+     * @returns None.
+     */
+    void EvaluateRulesAgainstSnapshotUntilFirstFire(
+        PluginContext* pluginContext,
+        const PluginSDK::PluginGameSnapshot* gameSnapshot,
+        const std::function<void(const Rule&)>& onRuleFired);
 
-    // Re-sort the rule list by Order. Call after LoadRules and after any
-    // Up/Down move so the hot path can iterate `m_Rules` directly.
-    void SortByOrder();
+    /**
+     * Sorts rules by the persisted `Order` field so evaluation is a flat scan.
+     *
+     * @returns None.
+     */
+    void SortRulesByEvaluationOrder();
 
     std::vector<Rule>& GetRules() { return m_Rules; }
     const std::vector<Rule>& GetRules() const { return m_Rules; }

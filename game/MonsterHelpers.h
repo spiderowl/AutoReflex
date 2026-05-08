@@ -9,24 +9,42 @@
 
 namespace AutoReflex { namespace Game {
 
-// Narrow a std::wstring to UTF-8 (lossy fallback to '?' for unmappable chars).
-// Used by the script engine to compare entity Path strings against case-
-// insensitive needles supplied by the rule DSL (`hasName(...)`).
-inline std::string WStringToString(const std::wstring& ws)
+/**
+ * Converts a UTF-16 wide string to a UTF-8 narrow string.
+ *
+ * @param wideStringUtf16 Input UTF-16 string.
+ * @returns UTF-8 encoded string, with a lossy '?' fallback for unmappable characters.
+ */
+inline std::string ConvertWideStringUtf16ToUtf8String(const std::wstring& wideStringUtf16)
 {
-    if (ws.empty()) return {};
-    int len = WideCharToMultiByte(CP_UTF8, 0, ws.data(), static_cast<int>(ws.size()),
+    if (wideStringUtf16.empty()) return {};
+    const int utf8ByteCount = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        wideStringUtf16.data(),
+        static_cast<int>(wideStringUtf16.size()),
                                   nullptr, 0, nullptr, nullptr);
-    if (len <= 0) {
-        std::string out(ws.size(), ' ');
-        for (size_t i = 0; i < ws.size(); ++i)
-            out[i] = (ws[i] < 128) ? static_cast<char>(ws[i]) : '?';
-        return out;
+    if (utf8ByteCount <= 0) {
+        std::string lossyAsciiString(wideStringUtf16.size(), ' ');
+        for (size_t wideStringIndex = 0; wideStringIndex < wideStringUtf16.size(); ++wideStringIndex) {
+            lossyAsciiString[wideStringIndex] =
+                (wideStringUtf16[wideStringIndex] < 128)
+                    ? static_cast<char>(wideStringUtf16[wideStringIndex])
+                    : '?';
+        }
+        return lossyAsciiString;
     }
-    std::string out(static_cast<size_t>(len), ' ');
-    WideCharToMultiByte(CP_UTF8, 0, ws.data(), static_cast<int>(ws.size()),
-                        out.data(), len, nullptr, nullptr);
-    return out;
+    std::string utf8String(static_cast<size_t>(utf8ByteCount), ' ');
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        wideStringUtf16.data(),
+        static_cast<int>(wideStringUtf16.size()),
+        utf8String.data(),
+        utf8ByteCount,
+        nullptr,
+        nullptr);
+    return utf8String;
 }
 
 }} // namespace AutoReflex::Game

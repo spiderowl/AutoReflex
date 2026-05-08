@@ -13,8 +13,17 @@ namespace PluginSDK { struct PluginGameSnapshot; }
 
 namespace AutoReflex {
 
-bool ShouldExecute(PluginContext* ctx,
-                   const PluginSDK::PluginGameSnapshot* snapshot,
-                   std::string& outReason);
+/**
+ * Determines whether rule evaluation is allowed for the current game state.
+ *
+ * @param pluginContext Host context used for attachment/foreground checks.
+ * @param gameSnapshot Already-fetched snapshot for the current tick.
+ * @param outExecutionGateReason Human-readable reason when evaluation is blocked.
+ * @returns True when rules may execute; otherwise false.
+ */
+bool DetermineWhetherRulesShouldExecute(
+    PluginContext* pluginContext,
+    const PluginSDK::PluginGameSnapshot* gameSnapshot,
+    std::string& outExecutionGateReason);
 
 } // namespace AutoReflex

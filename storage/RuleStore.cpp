@@ -97,11 +97,11 @@ static void parseJsonValue(const std::string& json, const std::string& key, std:
 
 // ── RuleStore implementation ────────────────────────────────────────
 
-RuleStore::RuleStore(const std::string& rulesDir)
-    : m_RulesDir(rulesDir)
+RuleStore::RuleStore(const std::string& rulesDirectoryPath)
+    : m_RulesDir(rulesDirectoryPath)
 {
     // Ensure directory exists
-    fs::create_directories(rulesDir);
+    fs::create_directories(rulesDirectoryPath);
 }
 
 bool RuleStore::SaveRule(const Rules::Rule& rule) {
@@ -125,8 +125,8 @@ bool RuleStore::SaveRule(const Rules::Rule& rule) {
     return file.is_open() || fs::exists(path);
 }
 
-bool RuleStore::LoadRule(const std::string& name, Rules::Rule& outRule) const {
-    std::string path = ruleFilePath(m_RulesDir, name);
+bool RuleStore::LoadRuleFromDiskByName(const std::string& ruleName, Rules::Rule& outRule) const {
+    std::string path = ruleFilePath(m_RulesDir, ruleName);
 
     std::ifstream file(path);
     if (!file.is_open()) return false;
@@ -146,7 +146,7 @@ bool RuleStore::LoadRule(const std::string& name, Rules::Rule& outRule) const {
     parseJsonValue(content, "ScriptBody", scriptVal);
     parseJsonValue(content, "CompileError", errorVal);
 
-    outRule.Name = nameVal.empty() ? name : nameVal;
+    outRule.Name = nameVal.empty() ? ruleName : nameVal;
     outRule.Enabled = (enabledVal == "true");
     if (keyVal.empty()) {
         outRule.Key = 0;
@@ -172,14 +172,14 @@ bool RuleStore::LoadRule(const std::string& name, Rules::Rule& outRule) const {
     return true;
 }
 
-bool RuleStore::DeleteRule(const std::string& name) {
-    std::string path = ruleFilePath(m_RulesDir, name);
+bool RuleStore::DeleteRuleFromDiskByName(const std::string& ruleName) {
+    std::string path = ruleFilePath(m_RulesDir, ruleName);
     return fs::remove(path) != 0;
 }
 
-bool RuleStore::RenameRule(const std::string& oldName, const std::string& newName) {
-    std::string oldPath = ruleFilePath(m_RulesDir, oldName);
-    std::string newPath = ruleFilePath(m_RulesDir, newName);
+bool RuleStore::RenameRuleOnDisk(const std::string& oldRuleName, const std::string& newRuleName) {
+    std::string oldPath = ruleFilePath(m_RulesDir, oldRuleName);
+    std::string newPath = ruleFilePath(m_RulesDir, newRuleName);
 
     if (!fs::exists(oldPath)) return false;
     if (fs::exists(newPath)) fs::remove(newPath);
@@ -208,14 +208,14 @@ std::vector<std::string> RuleStore::ListRuleNames() const {
     return names;
 }
 
-void RuleStore::LoadAll(std::vector<Rules::Rule>& outRules) const {
+void RuleStore::LoadAllRulesFromDisk(std::vector<Rules::Rule>& outRules) const {
     outRules.clear();
 
     auto names = ListRuleNames();
 
     for (const auto& name : names) {
         Rules::Rule rule;
-        if (LoadRule(name, rule)) {
+        if (LoadRuleFromDiskByName(name, rule)) {
             outRules.push_back(std::move(rule));
         }
     }

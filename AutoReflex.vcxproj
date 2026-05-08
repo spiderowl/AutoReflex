@@ -125,7 +125,10 @@
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
+    <ClCompile Include="rules\MonsterCandidateSelection.cpp" />
     <ClCompile Include="rules\RuleManager.cpp" />
+    <ClCompile Include="scripting\ScriptEngineBuffsDebug.cpp" />
+    <ClCompile Include="scripting\ScriptEngineDslPreprocessor.cpp" />
     <ClCompile Include="scripting\ScriptEngine.cpp" />
     <ClCompile Include="storage\RuleStore.cpp" />
     <ClCompile Include="storage\SettingsStore.cpp" />
@@ -137,9 +140,12 @@
     <ClInclude Include="core\ShouldExecute.h" />
     <ClInclude Include="game\KeySender.h" />
     <ClInclude Include="game\MonsterHelpers.h" />
+    <ClInclude Include="rules\MonsterCandidateSelection.h" />
     <ClInclude Include="rules\Rule.h" />
     <ClInclude Include="rules\RuleManager.h" />
     <ClInclude Include="scripting\exprtk.hpp" />
+    <ClInclude Include="scripting\ScriptEngineBuffsDebug.h" />
+    <ClInclude Include="scripting\ScriptEngineDslPreprocessor.h" />
     <ClInclude Include="scripting\ScriptEngine.h" />
     <ClInclude Include="sdk\PluginAPI.h" />
     <ClInclude Include="sdk\PluginContext.h" />

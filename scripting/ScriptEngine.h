@@ -32,15 +32,28 @@ public:
     CompiledExpression();
     ~CompiledExpression();
 
-    // Compile an expression string; returns true on success.
-    bool Compile(const std::string& exprString, std::string& errorMsg);
+    /**
+     * Compiles a user-authored expression string into an EXPRTK expression.
+     *
+     * @param rawExpressionString User-authored script body (may include DSL conveniences).
+     * @param outErrorMessage On failure, receives a user-facing compilation error message.
+     * @returns True when compilation succeeded; otherwise false.
+     */
+    bool CompileExpressionString(const std::string& rawExpressionString, std::string& outErrorMessage);
 
-    // Evaluate against a single RadarEntity. Reads only the host-bridge data
-    // referenced by the compiled expression (see needs* flags below).
-    bool Evaluate(PluginContext* ctx,
-                  const PluginSDK::RadarEntity& entity) const;
+    /**
+     * Evaluates the compiled expression against a single entity.
+     *
+     * @param pluginContext Host bridge used for optional cursor/buff/path queries.
+     * @param radarEntity Entity whose fields are bound to `e_*` variables.
+     * @returns True when the expression evaluates non-zero; otherwise false.
+     */
+    bool EvaluateExpressionAgainstEntity(
+        PluginContext* pluginContext,
+        const PluginSDK::RadarEntity& radarEntity) const;
 
-    bool IsValid() const { return expression_ != nullptr; }
+    /** Returns whether an expression was successfully compiled and is ready to evaluate. */
+    bool HasCompiledExpression() const { return expression_ != nullptr; }
 
     // Internal helpers used by EXPRTK thunks.
     bool   HasBuffIdx(int idx) const;
@@ -121,17 +134,46 @@ public:
     ScriptEngine();
     ~ScriptEngine();
 
-    bool Initialize();
-    bool IsInitialized() const { return initialized_; }
+    /**
+     * Initializes the script engine subsystem.
+     *
+     * @returns True when initialization succeeded; otherwise false.
+     */
+    bool InitializeScriptEngineSubsystem();
+
+    /** Returns whether the script engine subsystem has been initialized. */
+    bool HasInitializedScriptEngineSubsystem() const { return hasInitializedScriptEngineSubsystem_; }
 
     // Debugging: override where AutoReflex writes the buffs dump log.
     // This is a global path used by the expression engine; intended to be set
     // by the plugin once from SetPluginDirectory().
-    static void SetBuffsDumpPath(const std::string& path);
-    static void SetBuffsDumpEnabled(bool enabled);
+    /**
+     * Sets the output path for optional buffs dump logging.
+     *
+     * @param buffsDumpFilePath Full path to the dump file.
+     * @returns None.
+     */
+    static void SetBuffsDumpPath(const std::string& buffsDumpFilePath);
 
-    static bool ValidateExpression(const std::string& expr, std::string& errorMsg);
+    /**
+     * Enables or disables optional buffs dump logging.
+     *
+     * @param isBuffsDumpEnabled True to enable logging; otherwise false.
+     * @returns None.
+     */
+    static void SetBuffsDumpEnabled(bool isBuffsDumpEnabled);
+
+    /**
+     * Validates whether a raw user expression can be compiled.
+     *
+     * @param rawExpressionString User-authored script body.
+     * @param outErrorMessage On failure, receives a user-facing error message.
+     * @returns True when the expression validates; otherwise false.
+     */
+    static bool ValidateUserExpressionString(
+        const std::string& rawExpressionString,
+        std::string& outErrorMessage);
 
 private:
-    bool initialized_ = false;
+    bool hasInitializedScriptEngineSubsystem_ = false;
 };

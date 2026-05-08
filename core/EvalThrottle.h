@@ -15,17 +15,21 @@ namespace Core {
 
 class EvalThrottle {
 public:
-    // Returns true when at least intervalMs has passed since the last accepted
-    // tick. On true, the next slot is scheduled `intervalMs` later.
-    // intervalMs <= 0 disables the throttle (always returns true).
-    bool ShouldEvaluate(int intervalMs) {
-        if (intervalMs <= 0) return true;
+    /**
+     * Determines whether rule evaluation should run for the current tick.
+     *
+     * @param evaluationIntervalMs Minimum time between accepted ticks; <= 0 disables throttling.
+     * @returns True when evaluation is permitted now; otherwise false.
+     */
+    bool DetermineWhetherEvaluationShouldRunNow(int evaluationIntervalMs) {
+        if (evaluationIntervalMs <= 0) return true;
         const auto now = std::chrono::steady_clock::now();
         if (now < m_NextEval) return false;
-        m_NextEval = now + std::chrono::milliseconds(intervalMs);
+        m_NextEval = now + std::chrono::milliseconds(evaluationIntervalMs);
         return true;
     }
 
+    /** Resets the throttle so the next call is accepted immediately. */
     void Reset() { m_NextEval = std::chrono::steady_clock::time_point{}; }
 
 private:

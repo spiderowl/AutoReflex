@@ -12,25 +12,36 @@ namespace Storage {
 
 class RuleStore {
 public:
-    explicit RuleStore(const std::string& rulesDir);
+    explicit RuleStore(const std::string& rulesDirectoryPath);
 
-    // Save a single rule to disk
+    /** Saves a single rule to disk. */
     bool SaveRule(const Rules::Rule& rule);
 
-    // Load a single rule from disk
-    bool LoadRule(const std::string& name, Rules::Rule& outRule) const;
+    /**
+     * Loads a single rule from disk.
+     *
+     * @param ruleName File stem under the rules directory.
+     * @param outRule Output rule populated on success.
+     * @returns True on success; otherwise false.
+     */
+    bool LoadRuleFromDiskByName(const std::string& ruleName, Rules::Rule& outRule) const;
 
-    // Delete a rule from disk
-    bool DeleteRule(const std::string& name);
+    /** Deletes a rule file from disk. */
+    bool DeleteRuleFromDiskByName(const std::string& ruleName);
 
-    // Rename a rule (move JSON file)
-    bool RenameRule(const std::string& oldName, const std::string& newName);
+    /** Renames a rule by moving its JSON file on disk. */
+    bool RenameRuleOnDisk(const std::string& oldRuleName, const std::string& newRuleName);
 
-    // List all rule names on disk
+    /** Lists all rule names currently present on disk. */
     std::vector<std::string> ListRuleNames() const;
 
-    // Load all rules into a vector
-    void LoadAll(std::vector<Rules::Rule>& outRules) const;
+    /**
+     * Loads all rules into a vector.
+     *
+     * @param outRules Output vector populated and sorted by `Order`.
+     * @returns None.
+     */
+    void LoadAllRulesFromDisk(std::vector<Rules::Rule>& outRules) const;
 
 private:
     std::string m_RulesDir;

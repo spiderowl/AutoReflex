@@ -275,7 +275,7 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
             plugin->m_RuleStore->SaveRule(rules[i]);
             plugin->m_RuleStore->SaveRule(rules[i - 1]);
         }
-        plugin->m_RuleManager->SortByOrder();
+        plugin->m_RuleManager->SortRulesByEvaluationOrder();
     }
     ImGui::SameLine();
     if (ImGui::Button("Down", toolbarBtnSize)
@@ -289,7 +289,7 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
             plugin->m_RuleStore->SaveRule(rules[i]);
             plugin->m_RuleStore->SaveRule(rules[i + 1]);
         }
-        plugin->m_RuleManager->SortByOrder();
+        plugin->m_RuleManager->SortRulesByEvaluationOrder();
     }
 
     ImGui::SameLine();
@@ -317,7 +317,9 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
             if (ImGui::Button("Delete")) {
                 int idx = plugin->m_SelectedRuleIndex;
                 if (idx >= 0 && idx < static_cast<int>(rules.size()) && rules[idx].Name == pendingDeleteName) {
-                    if (plugin->m_RuleStore) plugin->m_RuleStore->DeleteRule(rules[idx].Name);
+                    if (plugin->m_RuleStore) {
+                        plugin->m_RuleStore->DeleteRuleFromDiskByName(rules[idx].Name);
+                    }
                     rules.erase(rules.begin() + idx);
                     plugin->m_SelectedRuleIndex = rules.empty()
                         ? -1
@@ -383,7 +385,9 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
                 lastRenameError = "Invalid rule name (file name unsafe). Avoid <>:\"/\\|?* and trailing dot/space.";
             } else {
                 bool renamed = false;
-                if (plugin->m_RuleStore) renamed = plugin->m_RuleStore->RenameRule(oldName, newName);
+                if (plugin->m_RuleStore) {
+                    renamed = plugin->m_RuleStore->RenameRuleOnDisk(oldName, newName);
+                }
                 if (renamed) {
                     lastRenameError.clear();
                     rule.Name = newName;
@@ -453,12 +457,12 @@ void SettingsPanel::DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargi
     ImGui::Spacing();
     if (ImGui::Button("Compile & Save", ImVec2(220, 0))) {
         if (plugin->m_RuleStore) plugin->m_RuleStore->SaveRule(rule);
-        plugin->m_RuleManager->CompileRule(rule);
+        plugin->m_RuleManager->CompileRuleExpression(rule);
     }
     if (!rule.CompileError.empty()) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Error");
-    } else if (rule.CompiledExpr && rule.CompiledExpr->IsValid()) {
+    } else if (rule.CompiledExpr && rule.CompiledExpr->HasCompiledExpression()) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(0.3f, 1, 0.3f, 1), "OK");
     }

@@ -1,10 +1,12 @@
 // AutoReflex - ScriptEngine.cpp
 // EXPRTK-based expression evaluation engine. Header-only library — no
-// external linking required. Hot path is CompiledExpression::Evaluate().
+// external linking required. Hot path is CompiledExpression::EvaluateExpressionAgainstEntity().
 
 #include "ScriptEngine.h"
 #include "../sdk/PluginContext.h"
 #include "../game/MonsterHelpers.h"
+#include "ScriptEngineDslPreprocessor.h"
+#include "ScriptEngineBuffsDebug.h"
 
 #include "exprtk.hpp"
 
@@ -14,16 +16,6 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
-#if defined(_DEBUG) || defined(AUTOREFLEX_ENABLE_BUFFS_DUMP)
-#define AUTOREFLEX_BUFFS_DUMP 1
-#include <fstream>
-#else
-#define AUTOREFLEX_BUFFS_DUMP 0
-#endif
-#include <mutex>
-#include <unordered_set>
-#include <chrono>
-#include <filesystem>
 #include <cstring>
 
 using symbol_table_t = exprtk::symbol_table<double>;
@@ -360,81 +352,19 @@ bool TranslateFriendlyMonsterCountChain(const std::string& s,
     return TranslateMonsterCountChainImpl("friendlyMonsterCount", 2, s, i, outExpr, buffNeedles, pathNeedles, errorMsg);
 }
 
-bool PreprocessExpression(const std::string& in,
-                          std::string& out,
-                          std::vector<std::string>& buffNeedles,
-                          std::vector<std::string>& pathNeedles,
-                          std::string& errorMsg)
+bool PreprocessExpression(
+    const std::string& rawExpressionString,
+    std::string& outExprtkExpressionString,
+    std::vector<std::string>& outBuffNeedles,
+    std::vector<std::string>& outPathNeedles,
+    std::string& outErrorMessage)
 {
-    out.clear();
-    out.reserve(in.size());
-
-    size_t i = 0;
-    while (i < in.size()) {
-        std::string translated;
-        size_t save = i;
-        if (TranslateMonsterCountChain(in, save, translated, buffNeedles, pathNeedles, errorMsg)) {
-            out += translated;
-            i = save;
-            continue;
-        }
-        if (TranslateFriendlyMonsterCountChain(in, save, translated, buffNeedles, pathNeedles, errorMsg)) {
-            out += translated;
-            i = save;
-            continue;
-        }
-
-        if (in.compare(i, 8, "hasBuff(") == 0) {
-            size_t j = i + 8;
-            while (j < in.size() && (in[j] == ' ' || in[j] == '\t')) ++j;
-            if (j >= in.size() || in[j] != '"') { errorMsg = "hasBuff() expects a quoted string"; return false; }
-            std::string needle;
-            size_t nextPos = j;
-            if (!ExtractQuotedArg(in, j, needle, nextPos)) { errorMsg = "hasBuff() string is not closed"; return false; }
-            while (nextPos < in.size() && (in[nextPos] == ' ' || in[nextPos] == '\t')) ++nextPos;
-            if (nextPos >= in.size() || in[nextPos] != ')') { errorMsg = "hasBuff() missing ')'"; return false; }
-            int idx = InternNeedle(buffNeedles, needle);
-            out += "hasBuffIdx(" + std::to_string(idx) + ")";
-            i = nextPos + 1;
-            continue;
-        }
-
-        if (in.compare(i, 12, "hasBuffValue(") == 0) {
-            size_t j = i + 12;
-            while (j < in.size() && (in[j] == ' ' || in[j] == '\t')) ++j;
-            if (j >= in.size() || in[j] != '"') { errorMsg = "hasBuffValue() expects a quoted string"; return false; }
-            std::string needle;
-            size_t nextPos = j;
-            if (!ExtractQuotedArg(in, j, needle, nextPos)) { errorMsg = "hasBuffValue() string is not closed"; return false; }
-            while (nextPos < in.size() && (in[nextPos] == ' ' || in[nextPos] == '\t')) ++nextPos;
-            if (nextPos >= in.size() || in[nextPos] != ')') { errorMsg = "hasBuffValue() missing ')'"; return false; }
-            int idx = InternNeedle(buffNeedles, needle);
-            out += "hasBuffValueIdx(" + std::to_string(idx) + ")";
-            i = nextPos + 1;
-            continue;
-        }
-
-        if (in.compare(i, 13, "pathContains(") == 0) {
-            size_t j = i + 13;
-            while (j < in.size() && (in[j] == ' ' || in[j] == '\t')) ++j;
-            if (j >= in.size() || in[j] != '"') { errorMsg = "pathContains() expects a quoted string"; return false; }
-            std::string needle;
-            size_t nextPos = j;
-            if (!ExtractQuotedArg(in, j, needle, nextPos)) { errorMsg = "pathContains() string is not closed"; return false; }
-            while (nextPos < in.size() && (in[nextPos] == ' ' || in[nextPos] == '\t')) ++nextPos;
-            if (nextPos >= in.size() || in[nextPos] != ')') { errorMsg = "pathContains() missing ')'"; return false; }
-            int idx = InternNeedle(pathNeedles, needle);
-            out += "pathContainsIdx(" + std::to_string(idx) + ")";
-            i = nextPos + 1;
-            continue;
-        }
-
-        out.push_back(in[i]);
-        ++i;
-    }
-
-    errorMsg.clear();
-    return true;
+    return AutoReflex::Scripting::Internal::PreprocessUserExpressionStringToExprtkExpressionString(
+        rawExpressionString,
+        outExprtkExpressionString,
+        outBuffNeedles,
+        outPathNeedles,
+        outErrorMessage);
 }
 
 // EXPRTK uses C function pointers for custom functions; thread_local pointer
@@ -476,150 +406,16 @@ bool Contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
-#if AUTOREFLEX_BUFFS_DUMP
-std::mutex g_buffsDumpMu;
-std::string g_buffsDumpPath = "AutoReflex_BuffsDump.txt";
-bool g_buffsDumpEnabled = false;
-#endif
-
-static bool IsTrueTag(const char* tag)
-{
-    if (!tag) return false;
-    // Any line that proves the entity actually matched the expression.
-    return std::string(tag).rfind("Evaluate_TRUE", 0) == 0;
-}
-
-uintptr_t TryGetBuffsAddrFromDebugList(PluginContext* ctx, uint32_t entityId)
-{
-    if (!ctx || !ctx->GetEntityDebugList) return 0;
-    // Cache the debug list scan to avoid O(monsters * entities) work each tick.
-    static std::mutex s_cacheMu;
-    static std::unordered_map<uint32_t, uintptr_t> s_buffsAddrById;
-    static uint64_t s_lastRefreshMs = 0;
-
-    const auto now = std::chrono::steady_clock::now().time_since_epoch();
-    const uint64_t nowMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
-
-    std::lock_guard<std::mutex> lock(s_cacheMu);
-    // Refresh at most twice per second.
-    if (nowMs - s_lastRefreshMs > 500) {
-        s_buffsAddrById.clear();
-        const auto list = ctx->GetEntityDebugList();
-        s_buffsAddrById.reserve(list.size());
-        for (const auto& e : list) {
-            uintptr_t buffsAddr = 0;
-            for (const auto& kv : e.ComponentAddresses) {
-                std::string k = kv.first;
-                LowerAsciiInPlace(k);
-                if (k.find("buff") != std::string::npos) { buffsAddr = kv.second; break; }
-            }
-            if (buffsAddr) s_buffsAddrById.emplace(e.Id, buffsAddr);
-        }
-        s_lastRefreshMs = nowMs;
-    }
-
-    auto it = s_buffsAddrById.find(entityId);
-    return (it == s_buffsAddrById.end()) ? 0 : it->second;
-}
-
-uintptr_t ResolveBuffsAddr(PluginContext* ctx, const PluginSDK::RadarEntity& ent, bool& outUsedFallback)
-{
-    outUsedFallback = false;
-    uintptr_t addr = ent.ComponentCache.BuffsAddr;
-    if (addr != 0) return addr;
-    addr = TryGetBuffsAddrFromDebugList(ctx, static_cast<uint32_t>(ent.Id));
-    if (addr != 0) outUsedFallback = true;
-    return addr;
-}
-
-void AppendBuffsDebugLine(const PluginSDK::RadarEntity& ent,
-                          const PluginSDK::PluginBuffsData* dataOrNull,
-                          const char* tag)
-{
-#if !AUTOREFLEX_BUFFS_DUMP
-    (void)ent; (void)dataOrNull; (void)tag;
-    return;
-#else
-    // User-requested debugging: dump what ReadBuffsComponent returned.
-    // Intentionally append-only and can be large.
-    {
-        std::lock_guard<std::mutex> lock(g_buffsDumpMu);
-        if (!g_buffsDumpEnabled) return;
-    }
-    static std::mutex s_mu;
-    static std::unordered_set<uint32_t> s_loggedOnce;
-
-    const uint32_t id = static_cast<uint32_t>(ent.Id);
-    {
-        std::lock_guard<std::mutex> lock(s_mu);
-        // Log each entity once per run, but ALWAYS log TRUE matches even if already seen.
-        if (!IsTrueTag(tag) && !s_loggedOnce.insert(id).second) return;
-    }
-
-    std::string pathCopy;
-    { std::lock_guard<std::mutex> lock(g_buffsDumpMu); pathCopy = g_buffsDumpPath; }
-
-    // Ensure parent folder exists (we usually point at <pluginDir>/config/...).
-    try {
-        std::filesystem::path p(pathCopy);
-        if (p.has_parent_path()) {
-            std::filesystem::create_directories(p.parent_path());
-        }
-    } catch (...) {
-    }
-
-    std::ofstream f(pathCopy.c_str(), std::ios::out | std::ios::app);
-    if (!f.is_open()) return;
-
-    const auto now = std::chrono::system_clock::now().time_since_epoch();
-    const auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-
-    f << "t_ms=" << ms
-      << " tag=" << (tag ? tag : "")
-      << " entId=" << ent.Id
-      << " reaction=" << static_cast<int>(ent.Reaction)
-      << " hp=" << ent.CurrentHP
-      << " sleeping=" << (ent.IsSleeping ? 1 : 0)
-      << " buffsAddr=0x" << std::hex << ent.ComponentCache.BuffsAddr << std::dec;
-
-    if (!dataOrNull) {
-        f << " valid=<null>\n";
-        return;
-    }
-
-    f << " valid=" << (dataOrNull->Valid ? 1 : 0)
-      << " buffCount=" << dataOrNull->Buffs.size()
-      << "\n";
-
-    for (size_t i = 0; i < dataOrNull->Buffs.size(); ++i) {
-        f << "  [" << i << "] name=\"" << dataOrNull->Buffs[i].Name << "\"\n";
-    }
-#endif
-}
-
 } // anonymous namespace
 
 void ScriptEngine::SetBuffsDumpPath(const std::string& path)
 {
-#if !AUTOREFLEX_BUFFS_DUMP
-    (void)path;
-    return;
-#else
-    if (path.empty()) return;
-    std::lock_guard<std::mutex> lock(g_buffsDumpMu);
-    g_buffsDumpPath = path;
-#endif
+    AutoReflex::Scripting::Internal::SetBuffsDebugDumpFilePath(path);
 }
 
 void ScriptEngine::SetBuffsDumpEnabled(bool enabled)
 {
-#if !AUTOREFLEX_BUFFS_DUMP
-    (void)enabled;
-    return;
-#else
-    std::lock_guard<std::mutex> lock(g_buffsDumpMu);
-    g_buffsDumpEnabled = enabled;
-#endif
+    AutoReflex::Scripting::Internal::SetBuffsDebugDumpEnabled(enabled);
 }
 
 
@@ -636,15 +432,18 @@ void CompiledExpression::ComputeNeedsFlags()
                            || (compiledString_.find("hasBuffValueIdxGate(") != std::string::npos);
 }
 
-bool CompiledExpression::Compile(const std::string& exprString, std::string& errorMsg)
+bool CompiledExpression::CompileExpressionString(
+    const std::string& rawExpressionString,
+    std::string& outErrorMessage)
 {
-    exprString_ = exprString;
+    exprString_ = rawExpressionString;
     compiledString_.clear();
     buffNeedles_.clear();
     pathNeedles_.clear();
     pathNeedlesLower_.clear();
 
-    if (!PreprocessExpression(exprString_, compiledString_, buffNeedles_, pathNeedles_, errorMsg)) {
+    if (!PreprocessExpression(
+            exprString_, compiledString_, buffNeedles_, pathNeedles_, outErrorMessage)) {
         return false;
     }
 
@@ -662,40 +461,42 @@ bool CompiledExpression::Compile(const std::string& exprString, std::string& err
     symbolTable_->add_function("pathContainsIdx", &PathContainsIdxThunk);
 
     if (!parser_->compile(compiledString_, *expression_)) {
-        errorMsg = "Expression compilation failed. Translated: " + compiledString_;
+        outErrorMessage = "Expression compilation failed. Translated: " + compiledString_;
         return false;
     }
 
     ComputeNeedsFlags();
-    errorMsg.clear();
+    outErrorMessage.clear();
     return true;
 }
 
-bool CompiledExpression::Evaluate(PluginContext* ctx, const PluginSDK::RadarEntity& entity) const
+bool CompiledExpression::EvaluateExpressionAgainstEntity(
+    PluginContext* pluginContext,
+    const PluginSDK::RadarEntity& radarEntity) const
 {
     if (!expression_) return false;
 
     tl_expr = this;
 
     // Bind from RadarEntity directly — no intermediate copy.
-    e_Id            = static_cast<double>(entity.Id);
-    e_IsValid       = entity.IsValid ? 1.0 : 0.0;
-    e_Rarity        = static_cast<double>(entity.Rarity);
-    e_EntityState   = static_cast<double>(static_cast<int>(entity.entityState));
-    e_GridPositionX = static_cast<double>(entity.GridPositionX);
-    e_GridPositionY = static_cast<double>(entity.GridPositionY);
-    e_WorldX        = static_cast<double>(entity.WorldX);
-    e_WorldY        = static_cast<double>(entity.WorldY);
-    e_WorldZ        = static_cast<double>(entity.WorldZ);
-    e_CurrentHP     = static_cast<double>(entity.CurrentHP);
-    e_MaxHP         = static_cast<double>(entity.MaxHP);
-    e_CurrentES     = static_cast<double>(entity.CurrentES);
-    e_MaxES         = static_cast<double>(entity.MaxES);
-    e_IsSleeping    = entity.IsSleeping ? 1.0 : 0.0;
-    e_Reaction      = static_cast<double>(entity.Reaction);
+    e_Id            = static_cast<double>(radarEntity.Id);
+    e_IsValid       = radarEntity.IsValid ? 1.0 : 0.0;
+    e_Rarity        = static_cast<double>(radarEntity.Rarity);
+    e_EntityState   = static_cast<double>(static_cast<int>(radarEntity.entityState));
+    e_GridPositionX = static_cast<double>(radarEntity.GridPositionX);
+    e_GridPositionY = static_cast<double>(radarEntity.GridPositionY);
+    e_WorldX        = static_cast<double>(radarEntity.WorldX);
+    e_WorldY        = static_cast<double>(radarEntity.WorldY);
+    e_WorldZ        = static_cast<double>(radarEntity.WorldZ);
+    e_CurrentHP     = static_cast<double>(radarEntity.CurrentHP);
+    e_MaxHP         = static_cast<double>(radarEntity.MaxHP);
+    e_CurrentES     = static_cast<double>(radarEntity.CurrentES);
+    e_MaxES         = static_cast<double>(radarEntity.MaxES);
+    e_IsSleeping    = radarEntity.IsSleeping ? 1.0 : 0.0;
+    e_Reaction      = static_cast<double>(radarEntity.Reaction);
 
-    curCtx_ = ctx;
-    curEnt_ = &entity;
+    curCtx_ = pluginContext;
+    curEnt_ = &radarEntity;
     buffsCacheReady_ = false;
     buffsCacheValid_ = false;
     buffsCacheUsedFallback_ = false;
@@ -706,22 +507,31 @@ bool CompiledExpression::Evaluate(PluginContext* ctx, const PluginSDK::RadarEnti
     bool usedFallback = false;
     uintptr_t resolvedBuffsAddr = 0;
 
-    bool dumpEnabled = false;
-#if AUTOREFLEX_BUFFS_DUMP
-    { std::lock_guard<std::mutex> lock(g_buffsDumpMu); dumpEnabled = g_buffsDumpEnabled; }
-#endif
+    const bool dumpEnabled = AutoReflex::Scripting::Internal::GetIsBuffsDebugDumpEnabled();
     if (dumpEnabled) {
-        if (ctx && ctx->ReadBuffsComponent) {
-            resolvedBuffsAddr = ResolveBuffsAddr(ctx, entity, usedFallback);
+        if (pluginContext && pluginContext->ReadBuffsComponent) {
+            resolvedBuffsAddr = AutoReflex::Scripting::Internal::ResolveBuffsComponentAddress(
+                pluginContext,
+                radarEntity,
+                usedFallback);
             if (resolvedBuffsAddr != 0) {
-                dbgData = ctx->ReadBuffsComponent(resolvedBuffsAddr);
+                dbgData = pluginContext->ReadBuffsComponent(resolvedBuffsAddr);
                 dbgPtr = &dbgData;
-                AppendBuffsDebugLine(entity, dbgPtr, usedFallback ? "Evaluate_FallbackAddr" : "Evaluate");
+                AutoReflex::Scripting::Internal::AppendBuffsDebugDumpLine(
+                    radarEntity,
+                    dbgPtr,
+                    usedFallback ? "Evaluate_FallbackAddr" : "Evaluate");
             } else {
-                AppendBuffsDebugLine(entity, nullptr, "Evaluate_NoBuffsAddr");
+                AutoReflex::Scripting::Internal::AppendBuffsDebugDumpLine(
+                    radarEntity,
+                    nullptr,
+                    "Evaluate_NoBuffsAddr");
             }
         } else {
-            AppendBuffsDebugLine(entity, nullptr, "Evaluate_NoBuffsAPI");
+            AutoReflex::Scripting::Internal::AppendBuffsDebugDumpLine(
+                radarEntity,
+                nullptr,
+                "Evaluate_NoBuffsAPI");
         }
     }
 
@@ -735,10 +545,12 @@ bool CompiledExpression::Evaluate(PluginContext* ctx, const PluginSDK::RadarEnti
         pathLowerReady_ = false;
     }
 
-    // Cursor distance: only compute if the expression needs it (directly or via buff gates).
-    if ((needsCursorPx_ || needsCursorSq_ || needsCursorForBuffGate_) && ctx && ctx->WorldToScreen) {
+    // Cursor distance is an expensive host-bridge query; only compute when required by the rule.
+    if ((needsCursorPx_ || needsCursorSq_ || needsCursorForBuffGate_) &&
+        pluginContext && pluginContext->WorldToScreen) {
         float sx = 0.f, sy = 0.f;
-        if (ctx->WorldToScreen(entity.WorldX, entity.WorldY, entity.WorldZ, &sx, &sy)) {
+        if (pluginContext->WorldToScreen(
+                radarEntity.WorldX, radarEntity.WorldY, radarEntity.WorldZ, &sx, &sy)) {
             const ImVec2 mouse = ImGui::GetMousePos();
             const float dx = sx - mouse.x;
             const float dy = sy - mouse.y;
@@ -759,7 +571,10 @@ bool CompiledExpression::Evaluate(PluginContext* ctx, const PluginSDK::RadarEnti
     const double result = expression_->value();
     if (dumpEnabled && result != 0.0) {
         // When something *actually matches the rule*, ALWAYS log it (see IsTrueTag()).
-        AppendBuffsDebugLine(entity, dbgPtr, usedFallback ? "Evaluate_TRUE_FallbackAddr" : "Evaluate_TRUE");
+        AutoReflex::Scripting::Internal::AppendBuffsDebugDumpLine(
+            radarEntity,
+            dbgPtr,
+            usedFallback ? "Evaluate_TRUE_FallbackAddr" : "Evaluate_TRUE");
     }
     return result != 0.0;
 }
@@ -772,7 +587,8 @@ const PluginSDK::PluginBuffsData* CompiledExpression::GetBuffsDataCached(bool& o
 
     if (!buffsCacheReady_) {
         bool usedFallback = false;
-        const uintptr_t buffsAddr = ResolveBuffsAddr(curCtx_, *curEnt_, usedFallback);
+        const uintptr_t buffsAddr =
+            AutoReflex::Scripting::Internal::ResolveBuffsComponentAddress(curCtx_, *curEnt_, usedFallback);
         buffsCacheUsedFallback_ = usedFallback;
         if (!buffsAddr) {
             buffsCacheValid_ = false;
@@ -800,11 +616,14 @@ bool CompiledExpression::HasBuffIdx(int idx) const
     bool usedFallback = false;
     const auto* data = GetBuffsDataCached(usedFallback);
     if (!data) {
-        AppendBuffsDebugLine(*curEnt_, nullptr, "ReadBuffsComponent_NoAddr");
+        AutoReflex::Scripting::Internal::AppendBuffsDebugDumpLine(*curEnt_, nullptr, "ReadBuffsComponent_NoAddr");
         if (idx < static_cast<int>(buffResultCache_.size())) buffResultCache_[idx] = 0;
         return false;
     }
-    AppendBuffsDebugLine(*curEnt_, data, usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
+    AutoReflex::Scripting::Internal::AppendBuffsDebugDumpLine(
+        *curEnt_,
+        data,
+        usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
 
     bool found = false;
     const auto& needle = buffNeedles_[idx];
@@ -835,11 +654,14 @@ double CompiledExpression::HasBuffValueIdx(int idx) const
     bool usedFallback = false;
     const auto* data = GetBuffsDataCached(usedFallback);
     if (!data) {
-        AppendBuffsDebugLine(*curEnt_, nullptr, "ReadBuffsComponent_NoAddr");
+        AutoReflex::Scripting::Internal::AppendBuffsDebugDumpLine(*curEnt_, nullptr, "ReadBuffsComponent_NoAddr");
         if (idx < static_cast<int>(buffValueCache_.size())) buffValueCache_[idx] = 0;
         return 0.0;
     }
-    AppendBuffsDebugLine(*curEnt_, data, usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
+    AutoReflex::Scripting::Internal::AppendBuffsDebugDumpLine(
+        *curEnt_,
+        data,
+        usedFallback ? "ReadBuffsComponent_FallbackAddr" : "ReadBuffsComponent");
 
     int16_t value = 0;
     const auto& needle = buffNeedles_[idx];
@@ -866,7 +688,7 @@ bool CompiledExpression::PathContainsIdx(int idx) const
 
     // Lazily build a lowercased copy of the entity path once per evaluation.
     if (!pathLowerReady_) {
-        pathLowerScratch_ = AutoReflex::Game::WStringToString(curEnt_->Path);
+        pathLowerScratch_ = AutoReflex::Game::ConvertWideStringUtf16ToUtf8String(curEnt_->Path);
         LowerAsciiInPlace(pathLowerScratch_);
         pathLowerReady_ = true;
     }
@@ -883,17 +705,20 @@ bool CompiledExpression::PathContainsIdx(int idx) const
 ScriptEngine::ScriptEngine()  = default;
 ScriptEngine::~ScriptEngine() = default;
 
-bool ScriptEngine::Initialize() {
-    initialized_ = true;
+bool ScriptEngine::InitializeScriptEngineSubsystem() {
+    hasInitializedScriptEngineSubsystem_ = true;
     return true;
 }
 
-bool ScriptEngine::ValidateExpression(const std::string& expr, std::string& errorMsg) {
+bool ScriptEngine::ValidateUserExpressionString(
+    const std::string& rawExpressionString,
+    std::string& outErrorMessage)
+{
     symbol_table_t symbolTable;
     expression_t   expression;
     parser_t       parser;
 
-    // ValidateExpression doesn't evaluate, so all variables share one dummy backing slot.
+    // Validation doesn't evaluate, so all variables share one dummy backing slot.
     double dummy = 0.0;
     static const char* const kVarNames[] = {
         "e_Id", "e_IsValid", "e_Rarity", "e_EntityState",
@@ -908,7 +733,7 @@ bool ScriptEngine::ValidateExpression(const std::string& expr, std::string& erro
 
     std::string compiled;
     std::vector<std::string> bn, pn;
-    if (!PreprocessExpression(expr, compiled, bn, pn, errorMsg)) return false;
+    if (!PreprocessExpression(rawExpressionString, compiled, bn, pn, outErrorMessage)) return false;
 
     symbolTable.add_function("hasBuffIdx",      &Dummy1Thunk);
     symbolTable.add_function("hasBuffValueIdx", &Dummy1Thunk);
@@ -917,7 +742,7 @@ bool ScriptEngine::ValidateExpression(const std::string& expr, std::string& erro
     symbolTable.add_function("pathContainsIdx", &Dummy1Thunk);
 
     if (!parser.compile(compiled, expression)) {
-        errorMsg = "Expression syntax error. Translated: " + compiled;
+        outErrorMessage = "Expression syntax error. Translated: " + compiled;
         return false;
     }
     return true;
