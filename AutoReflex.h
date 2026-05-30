@@ -1,88 +1,127 @@
 // AutoReflex - POEFixer Plugin
-// Headless automation plugin: a settings UI for editing rules, plus a
-// background tick (DrawUI) that evaluates rules and synthesizes key presses.
-// There is intentionally no in-game overlay window.
+
+
 
 #pragma once
 
-#include "sdk/PluginAPI.h"
-#include "sdk/PluginContext.h"
+
+
+#include "sdk/PluginSDK.h"
+
+
 
 #include <string>
+
 #include <memory>
+
 #include <chrono>
 
+#include <filesystem>
+
+
+
 #include "rules/RuleManager.h"
+
 #include "storage/RuleStore.h"
+
 #include "storage/SettingsStore.h"
-#include "scripting/ScriptEngine.h"
-#include "core/EvalThrottle.h"
+
+#include "core/AnimationLock.h"
+
+
 
 namespace AutoReflex { namespace UI      { class SettingsPanel; } }
+
 namespace AutoReflex { namespace Storage { class SettingsStore; } }
 
-class AutoReflexPlugin : public IPlugin {
+
+
+class AutoReflexPlugin : public PluginSDK::Plugin {
+
     friend class AutoReflex::UI::SettingsPanel;
+
     friend class AutoReflex::Storage::SettingsStore;
 
+
+
 public:
-    /** Sets the plugin directory path provided by the host. */
-    void SetPluginDirectory(const char* pluginDirectoryPath) override;
 
-    /** Sets the host context used for snapshots and bridge calls. */
-    void SetContext(PluginContext* pluginContext) override;
+    const char* GetName() const override { return "AutoReflex"; }
 
-    /** Called by the host when the plugin is enabled. */
-    void OnEnable(bool isGameOpened) override;
 
-    /** Called by the host when the plugin is disabled. */
+
+    void OnEnable(bool isGameAttached) override;
+
+
+
     void OnDisable() override;
 
-    /** Draws the settings UI panel in the host-provided settings window. */
+
+
     void DrawSettings() override;
 
-    /** Host callback used as a per-frame background tick (no overlay window is drawn). */
+
+
     void DrawUI() override;
 
-    /** Persists all settings and rules to disk. */
+
+
     void SaveSettings() override;
 
-    const char* GetName() override   { return "AutoReflex"; }
-    int  GetSDKVersion() override    { return PLUGIN_SDK_VERSION; }
 
-    /**
-     * Indicates whether the host should call DrawUI().
-     *
-     * AutoReflex uses DrawUI() as a background tick for evaluation even though it draws no visible
-     * overlay window.
-     */
-    bool WantsOverlay() override     { return true; }
+
+    bool WantsOverlay() const override { return true; }
+
+
+
+    const std::string& GetLastExecutionGateReason() const { return m_LastExecutionGateReason; }
+
+
 
 private:
-    /** Loads settings and rules from disk into memory. */
+
     void LoadSettings();
 
-    // --- Host context ---
-    PluginContext* m_Context = nullptr;
-    std::string    m_Directory;
+    void ConfigureBuffsDebugDumpPaths();
 
-    // --- Persisted settings (config/settings.json) ---
-    // Rule evaluation pacing. Default ~60 Hz so 144 Hz monitors don't pay
-    // 144 Hz worth of host calls when 60 Hz is more than enough.
-    int m_EvalIntervalMs = 16;
+    void SubscribeToHostEvents();
 
-    // --- Subsystems ---
-    ScriptEngine                                        m_ScriptEngine;
+    void UnsubscribeFromHostEvents();
+
+
+
     std::unique_ptr<AutoReflex::Rules::RuleManager>     m_RuleManager;
-    std::unique_ptr<AutoReflex::Storage::RuleStore>     m_RuleStore;
-    std::unique_ptr<AutoReflex::Storage::SettingsStore> m_SettingsStore;
-    AutoReflex::Core::EvalThrottle                      m_EvalThrottle;
 
-    // --- "Test Fire" affordance in the Settings tab ---
+    std::unique_ptr<AutoReflex::Storage::RuleStore>     m_RuleStore;
+
+    std::unique_ptr<AutoReflex::Storage::SettingsStore> m_SettingsStore;
+
+    AutoReflex::Core::AnimationLock                     m_AnimationLock;
+
+
+
+    PluginSDK::EventsService::Token m_AreaChangeToken{};
+
+    PluginSDK::EventsService::Token m_GameDetachedToken{};
+
+
+
     bool                                  m_TestFireEnabled     = false;
+
+    bool                                  m_ShowGateReason      = false;
+
     float                                 m_TestFireCooldownSec = 0.8f;
+
     std::chrono::steady_clock::time_point m_LastTestFire;
 
-    // --- UI selection state (transient, not persisted) ---
+
+
     int m_SelectedRuleIndex = -1;
+
+
+
+    std::string m_LastExecutionGateReason = "Idle";
+
 };
+
+

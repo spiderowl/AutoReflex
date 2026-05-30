@@ -76,7 +76,8 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir)imgui\misc\cpp;$(ProjectDir);$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
 
       <!-- /bigobj: required for some EXPRTK TUs.
            /Zc:inline: drop unreferenced inline COMDATs.
@@ -109,7 +110,8 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir)imgui\misc\cpp;$(ProjectDir);$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)sdk;$(ProjectDir)imgui;$(ProjectDir)scripting;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -136,7 +138,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AutoReflex.h" />
-    <ClInclude Include="core\EvalThrottle.h" />
+    <ClInclude Include="core\AnimationLock.h" />
+    <ClInclude Include="core\EvalTickCache.h" />
     <ClInclude Include="core\ShouldExecute.h" />
     <ClInclude Include="game\KeySender.h" />
     <ClInclude Include="game\MonsterHelpers.h" />
@@ -147,12 +150,11 @@
     <ClInclude Include="scripting\ScriptEngineBuffsDebug.h" />
     <ClInclude Include="scripting\ScriptEngineDslPreprocessor.h" />
     <ClInclude Include="scripting\ScriptEngine.h" />
-    <ClInclude Include="sdk\PluginAPI.h" />
-    <ClInclude Include="sdk\PluginContext.h" />
-    <ClInclude Include="sdk\PluginGameData.h" />
-    <ClInclude Include="sdk\PluginHelpers.h" />
+    <ClInclude Include="sdk\PluginAbi.h" />
+    <ClInclude Include="sdk\PluginSDK.h" />
     <ClInclude Include="storage\RuleStore.h" />
     <ClInclude Include="storage\SettingsStore.h" />
+    <ClInclude Include="ui\KeyBindings.h" />
     <ClInclude Include="ui\SettingsPanel.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

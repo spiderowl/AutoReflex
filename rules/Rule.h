@@ -36,6 +36,7 @@ struct Rule {
     std::chrono::steady_clock::time_point LastFired;
     bool                                  EverFired    = false;
     RuleRoot                              Root = RuleRoot::Hostile;
+    bool                                  UsesMonsterScan = false;
 };
 
 } // namespace Rules

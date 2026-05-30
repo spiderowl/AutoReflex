@@ -15,7 +15,7 @@ public:
     static void Draw(AutoReflexPlugin* plugin);
 
 private:
-    static void DrawGeneralTab(AutoReflexPlugin* plugin, float rightMargin);
+    static void DrawGeneralTab(AutoReflexPlugin* plugin);
     static void DrawRulesCombined(AutoReflexPlugin* plugin, float rightMargin);
 
     // Create a new rule with defaults

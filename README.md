@@ -86,6 +86,17 @@ and
 (monsterCount.type(atleastrare).nearCursor(120) > 0)
 ```
 
+If you need player vitals (flasks, defensive skills), use `p_*` variables:
+
+- `p_HPPercent`, `p_ESPercent`, `p_MPPercent` — 0–100
+- `p_CurrentHP`, `p_MaxHP`, `p_CurrentES`, `p_MaxES`, `p_CurrentMP`, `p_MaxMP`
+
+Example — cast when energy shield is below 10%:
+
+```txt
+p_ESPercent < 10
+```
+
 If you need to bypass the default `monsterCount` filters, use raw entity fields. Available per-entity variables:
 
 - `e_Reaction` — `0` hostile, `2` friendly

@@ -3,7 +3,7 @@
 //
 // Format (hand-rolled minimal JSON, no external deps):
 // {
-//   "EvalIntervalMs": 16
+//   "ShowGateReason": false
 // }
 
 #include "SettingsStore.h"
@@ -42,9 +42,10 @@ static void parseJsonLine(const std::string& line, std::string& key, std::string
     value = trim(value);
 }
 
-static int parseInt(const std::string& s, int def) {
-    try { return std::stoi(s); }
-    catch (...) { return def; }
+static bool parseBool(const std::string& s, bool def) {
+    if (s == "true") return true;
+    if (s == "false") return false;
+    return def;
 }
 
 // ── SettingsStore implementation ────────────────────────────────────
@@ -58,7 +59,7 @@ SettingsStore::SettingsStore(AutoReflexPlugin* plugin)
     }
 
     // Always store config under the plugin directory so the host's CWD doesn't matter.
-    std::filesystem::path p = std::filesystem::path(m_Plugin->m_Directory) / "config" / "settings.json";
+    std::filesystem::path p = m_Plugin->DirectoryPath() / "config" / "settings.json";
     m_ConfigPath = p.string();
 }
 
@@ -74,8 +75,8 @@ void SettingsStore::LoadSettingsFromDisk() {
         parseJsonLine(line, key, value);
         if (key.empty()) continue;
 
-        if (key == "EvalIntervalMs") m_Plugin->m_EvalIntervalMs = parseInt(value, m_Plugin->m_EvalIntervalMs);
-        // Unknown keys (including legacy ones from older builds) are silently ignored.
+        if (key == "ShowGateReason") m_Plugin->m_ShowGateReason = parseBool(value, m_Plugin->m_ShowGateReason);
+        // Unknown keys (including legacy EvalIntervalMs from older builds) are silently ignored.
     }
 }
 
@@ -93,7 +94,7 @@ void SettingsStore::SaveSettingsToDisk() {
     if (!file.is_open()) return;
 
     file << "{\n"
-         << "  \"EvalIntervalMs\": " << m_Plugin->m_EvalIntervalMs << "\n"
+         << "  \"ShowGateReason\": " << (m_Plugin->m_ShowGateReason ? "true" : "false") << "\n"
          << "}\n";
 }
 
